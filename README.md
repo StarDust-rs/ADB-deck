@@ -45,8 +45,8 @@ for installation on the selected device). `--help` and `--version` are supported
 
 ## Releases
 
-Publishing a GitHub release with a new tag such as `v1.0.0` builds the RPMs from `main`, attaches
-them to the release and writes the notes from the commit titles since the last release. See
+Publishing a GitHub release with a new tag such as `v1.0.0` builds the Fedora 45 x86_64 RPM from `main`, attaches
+it to the release and writes the notes from the commit titles since the last release. See
 [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Keeping a phone connected (background service)
@@ -85,7 +85,7 @@ packaging/build-rpm.sh            # .fc<your Fedora release>; or pass a dist tag
 ```
 
 The spec follows the Fedora Rust guidelines: `cargo-rpm-macros` (`%cargo_prep -v vendor`, `%cargo_build`,
-`%cargo_test`, `%cargo_install`), the locked crates as a separate vendor tarball with a generated
+`%cargo_test`), the locked crates as a separate vendor tarball with a generated
 `cargo-vendor.txt` and `LICENSE.dependencies`, debuginfo, a man page, AppStream and desktop file
 validation in `%check`, and the user unit scriptlets. The tarballs and the build time are reproducible
 (`SOURCE_DATE_EPOCH`). Output: `dist/rpmbuild/RPMS/<arch>/adbdeck-<version>-1.fc<N>.<arch>.rpm`
@@ -120,4 +120,3 @@ ADBPlus: `assets/aya/` (the prebuilt helper `aya.dex`, its Kotlin source and lic
 under the AGPL's terms as well, including its offer of corresponding source for users who
 interact with it over a network. See `assets/aya/NOTICE.md`. Third-party crates keep their
 own licences; the RPM's `License:` field lists them.
-# ADB-deck

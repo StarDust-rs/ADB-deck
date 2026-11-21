@@ -12,6 +12,13 @@ planner, TCP probe), `daemon` (pid file, switch-off), `autostart` (entry, sync),
 peeking), `ui::devices` (endpoints, last seen, auto-connect), `adb::devices` (`is_online`, registry) and
 three fake-device integration tests. No real phone, USB tethering, Wayland session or reboot was tried.
 
+## First CI run (2026-11-21, from the workflow logs)
+
+On Fedora 44 and 45, x86_64 and aarch64, inside the release workflow: the crates compiled, **191 + 19 + 2 + 39 tests passed** (the code from the
+earlier passes compiled and its new tests pass), the desktop file and AppStream metadata validated. The run failed at rpmbuild's unpackaged-files
+check (`%cargo_install` installed crate sources); see `docs/PACKAGING_REPORT.md`. Nothing after that point has run: the `dnf install` check,
+`rpmlint`, the publish job.
+
 ## Fedora 44/45 packaging pass (not verified)
 
 The spec, `build-rpm.sh`, the AppStream file, the man page, the systemd unit and the workflow were rewritten for

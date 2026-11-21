@@ -76,6 +76,9 @@ removal.
 %prep
 %autosetup -n %{name}-%{version} -a1
 %cargo_prep -v vendor
+# Two files are called NOTICE.md and %%license installs by file name alone.
+cp -p assets/aya/NOTICE.md aya-NOTICE.md
+cp -p assets/scrcpy/NOTICE.md scrcpy-NOTICE.md
 
 %build
 %cargo_build
@@ -84,7 +87,9 @@ removal.
 %{cargo_vendor_manifest}
 
 %install
-%cargo_install
+# Not %%cargo_install: the crate also has a library target, and that macro would
+# then install the crate sources under /usr/share/cargo/registry as well.
+install -Dpm 0755 target/rpm/adbdeck %{buildroot}%{_bindir}/adbdeck
 install -Dpm 0644 packaging/adbdeck.1 %{buildroot}%{_mandir}/man1/adbdeck.1
 install -Dpm 0644 packaging/adbdeck.desktop %{buildroot}%{_datadir}/applications/adbdeck.desktop
 install -Dpm 0644 packaging/adbdeck-daemon.service %{buildroot}%{_userunitdir}/adbdeck-daemon.service
@@ -108,7 +113,7 @@ appstreamcli validate --no-net --explain %{buildroot}%{_metainfodir}/dev.adbdeck
 %systemd_user_preun adbdeck-daemon.service
 
 %files
-%license LICENSE assets/aya/LICENSE-AGPL-3.0.txt assets/aya/NOTICE.md assets/scrcpy/LICENSE-Apache-2.0.txt assets/scrcpy/NOTICE.md assets/fonts/Inter-LICENSE.txt assets/fonts/JetBrainsMono-OFL.txt
+%license LICENSE assets/aya/LICENSE-AGPL-3.0.txt aya-NOTICE.md assets/scrcpy/LICENSE-Apache-2.0.txt scrcpy-NOTICE.md assets/fonts/Inter-LICENSE.txt assets/fonts/JetBrainsMono-OFL.txt
 %license LICENSE.dependencies cargo-vendor.txt
 %doc README.md docs/ARCHITECTURE.md docs/FEATURE_INVENTORY.md
 %{_bindir}/adbdeck

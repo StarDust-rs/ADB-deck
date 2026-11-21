@@ -1,16 +1,24 @@
 # Packaging report
 
-Target: Fedora 44 and 45 (45 was released on 2026-11-03; Fedora 43 ends on 2026-12-09), x86_64 and aarch64.
-Built by `packaging/build-rpm.sh`, in CI by `.github/workflows/release.yml` inside the Fedora containers.
+Target: Fedora 45 (released 2026-11-03), x86_64. Built by `packaging/build-rpm.sh`, in CI by
+`.github/workflows/release.yml` inside the Fedora 45 container.
 
-**Nothing in this report was built or run.** The spec, scripts and workflow were rewritten without a Fedora
-system, `rpmbuild`, `cargo` or network. The checks that were possible here are listed at the end.
+## What a real run showed
+
+The first release run (logs reviewed) built the package on Fedora 44 and 45, x86_64 and aarch64. In all four: the crates vendored and compiled,
+191 + 19 + 2 + 39 tests passed, `desktop-file-validate` and `appstreamcli validate` passed, and the dependency generator produced the
+`bundled(crate(...))` Provides from `cargo-vendor.txt`. All four then failed at the end of the build, in the check for unpackaged files:
+`%cargo_install` also installs the crate sources into `/usr/share/cargo/registry/` when the crate has a library target as well as a binary.
+Fixed by installing `target/rpm/adbdeck` directly. The same run warned that two license files are both called `NOTICE.md` (installed by file name,
+so one would have replaced the other); they are now installed as `aya-NOTICE.md` and `scrcpy-NOTICE.md`.
+
+After that fix the package itself has **not** been built again: the rest of the report (everything after `%install`) is unverified.
 
 ## What the package follows
 
 | Practice | In this package |
 |---|---|
-| Rust guidelines | `BuildRequires: cargo-rpm-macros >= 25`; `%cargo_prep -v vendor` in `%prep`, `%cargo_build`, `%cargo_install`, `%cargo_test` (so the distribution's `%build_rustflags`, hardening and debuginfo apply); no `%cargo_generate_buildrequires`, which is not allowed with vendored crates |
+| Rust guidelines | `BuildRequires: cargo-rpm-macros >= 25`; `%cargo_prep -v vendor` in `%prep`, `%cargo_build`, `%cargo_test` (the binary is installed by hand, see above) (so the distribution's `%build_rustflags`, hardening and debuginfo apply); no `%cargo_generate_buildrequires`, which is not allowed with vendored crates |
 | Vendored crates | separate `Source1` vendor tarball; `%{cargo_vendor_manifest}` writes `cargo-vendor.txt`, from which the RPM generator derives the `bundled(crate(...))` (and, from Fedora 45, `purl(...)`) Provides; `%{cargo_license_summary}` in the log and `%{cargo_license}` as `LICENSE.dependencies`, both `%license` files |
 | License tag | SPDX expression built from `cargo metadata` of the locked set plus the bundled scrcpy server and fonts |
 | Debuginfo | on (the old `debug_package` opt-out is gone) |
@@ -32,7 +40,7 @@ system, `rpmbuild`, `cargo` or network. The checks that were possible here are l
 * **Fedora main repositories.** The package could not be submitted there as it stands: it bundles a scrcpy server binary and builds the
   openh264 source (H.264 is not allowed in Fedora's repositories without Cisco's binary), and its crates are vendored. It is meant for
   GitHub releases or a COPR.
-* **The `.src.rpm` is built once** (Fedora 45, x86_64); it contains everything to rebuild offline.
+* **Other variants.** The workflow builds Fedora 45 x86_64 only. The same spec built and tested on Fedora 44 and on aarch64 in the first run.
 
 ## What was checked in the sandbox
 
