@@ -1,0 +1,21 @@
+#!/bin/sh
+case "$1" in
+  battery)
+    if [ -n "$2" ]; then printf 'dumpsys %s\n' "$*" >> "$FAKE_STATE/control.log"
+    else printf "Current Battery Service state:\n  AC powered: false\n  USB powered: true\n  level: 87\n  voltage: 4123\n  temperature: 251\n"; fi;;
+  wifi) echo "  mWifiInfo SSID: \"HomeNet\", BSSID: aa:bb:cc:dd:ee:ff, MAC: 3c:28:6d:aa:bb:cc";;
+  diskstats)
+    echo "Data-Free: 51200000K / 128000000K total = 40% free"
+    echo "Package Names: [\"com.example.app\",\"com.android.settings\",\"com.example.game\"]"
+    echo "App Sizes: [52428800,31457280,104857600]"
+    echo "App Data Sizes: [10485760,5242880,209715200]"
+    echo "Cache Sizes: [2097152,1048576,52428800]";;
+  thermalservice) printf "Temperature{mValue=41.5, mType=0, mName=CPU0, mStatus=0}\nTemperature{mValue=43.5, mType=0, mName=CPU1, mStatus=0}\n";;
+  SurfaceFlinger) echo "  flips=$(( $(date +%s) * 60 ))";;
+  deviceidle)
+    case "$2" in force-idle|unforce) printf 'dumpsys %s\n' "$*" >> "$FAKE_STATE/control.log";; esac
+    if [ "$2" = whitelist ]; then echo "system-excidle,com.android.shell,2000"; sed 's/^/user,/; s/$/,10123/' "$FAKE_STATE/idle" 2>/dev/null; fi;;
+  activity) echo "  ACTIVITY com.example.app/.MainActivity 1a2b3c pid=4242";;
+  package)
+    if [ "$2" = packages ]; then cat "$FAKE_FIXTURES/data/packages.txt"; else cat "$FAKE_FIXTURES/data/package-detail.txt"; fi;;
+esac

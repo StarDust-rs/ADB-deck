@@ -1,0 +1,11 @@
+#!/bin/sh
+case "$1" in
+  get)
+    if [ -f "$FAKE_STATE/appops.log" ]; then
+      awk '{m[$3]=$4} END{for(o in m) print o": "m[o]"; time=+1m ago"}' "$FAKE_STATE/appops.log"
+    else
+      echo "SYSTEM_ALERT_WINDOW: deny"
+      echo "RUN_IN_BACKGROUND: allow"
+    fi;;
+  set) printf '%s\n' "$*" >> "$FAKE_STATE/appops.log";;
+esac

@@ -1,0 +1,11 @@
+#!/bin/sh
+cat <<EOP
+Tasks: 412 total,   1 running, 411 sleeping
+800%cpu  12%user   0%nice   4%sys 784%idle
+  PID %CPU     TIME+  RES USER         ARGS
+ 4242 12.5   0:42.10  245M u0_a123     com.example.app
+ 1021  4.0   5:01.33   88M system       /system/bin/surfaceflinger
+ 5555  2.0   0:10.00   64M u0_a124     com.example.game:remote
+  987  0.0   1:00.00   12M root         /system/bin/init
+ 7000  0.0   0:00.00  3.2M shell        top -b -n 1
+EOP

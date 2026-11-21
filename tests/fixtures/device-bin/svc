@@ -1,0 +1,2 @@
+#!/bin/sh
+printf 'svc %s\n' "$*" >> "$FAKE_STATE/control.log"

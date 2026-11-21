@@ -1,0 +1,2 @@
+#!/bin/sh
+cat "$FAKE_FIXTURES/data/hierarchy.xml"; echo "UI hierarchy dumped to: /dev/tty"

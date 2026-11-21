@@ -1,0 +1,9 @@
+#!/bin/sh
+case "$1 $2" in
+  "size "|"size") echo "Physical size: 360x720"; [ -f "$FAKE_STATE/wm-size" ] && echo "Override size: $(cat "$FAKE_STATE/wm-size")";;
+  "density "|"density") echo "Physical density: 320"; [ -f "$FAKE_STATE/wm-density" ] && echo "Override density: $(cat "$FAKE_STATE/wm-density")";;
+  "size reset") rm -f "$FAKE_STATE/wm-size"; printf 'wm size reset\n' >> "$FAKE_STATE/control.log";;
+  "density reset") rm -f "$FAKE_STATE/wm-density"; printf 'wm density reset\n' >> "$FAKE_STATE/control.log";;
+  size*) printf '%s\n' "$2" > "$FAKE_STATE/wm-size"; printf 'wm %s\n' "$*" >> "$FAKE_STATE/control.log";;
+  density*) printf '%s\n' "$2" > "$FAKE_STATE/wm-density"; printf 'wm %s\n' "$*" >> "$FAKE_STATE/control.log";;
+esac

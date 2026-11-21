@@ -1,0 +1,6 @@
+#!/bin/sh
+cat <<EOP
+5: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 3000
+    link/ether 3c:28:6d:aa:bb:cc brd ff:ff:ff:ff:ff:ff
+    inet 192.168.1.42/24 brd 192.168.1.255 scope global wlan0
+EOP

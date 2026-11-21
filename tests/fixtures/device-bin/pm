@@ -1,0 +1,25 @@
+#!/bin/sh
+# Records state-changing calls in $FAKE_STATE/pm.log so tests can check them.
+log() { printf '%s\n' "$*" >> "$FAKE_STATE/pm.log"; }
+case "$1 $2" in
+  "list packages")
+    shift 2
+    f=0; user=0; for a in "$@"; do [ "$a" = "-f" ] && f=1; [ "$a" = "-3" ] && user=1; done
+    for p in com.example.app com.android.settings com.example.game; do
+      [ $user = 1 ] && [ $p = com.android.settings ] && continue
+      if [ $f = 1 ]; then echo "package:/data/app/~~x/$p-1/base.apk=$p"; else echo "package:$p"; fi
+    done; exit 0;;
+esac
+case "$1" in
+  clear) log "$@"; echo Success;;
+  disable-user|enable) echo "Package $3 new state: changed";;
+  grant|revoke)
+    log "$@"
+    case "$3" in
+      android.permission.INTERNET) echo "Operation not allowed: java.lang.SecurityException: Permission android.permission.INTERNET requested by $2 is not a changeable permission type" >&2; exit 1;;
+    esac;;
+  suspend|unsuspend) log "$@"; echo "Package $2 new suspended state: $([ "$1" = suspend ] && echo true || echo false)";;
+  hide|unhide) log "$@"; echo "Package $2 new hidden state: $([ "$1" = hide ] && echo true || echo false)";;
+  uninstall) log "$@"; echo Success;;
+  trim-caches) log "$@";;
+esac

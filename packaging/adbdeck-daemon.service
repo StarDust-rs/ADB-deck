@@ -1,0 +1,14 @@
+[Unit]
+Description=ADB Deck background service (keeps remembered Android devices connected)
+Documentation=man:adbdeck(1)
+ConditionUser=!root
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/adbdeck --daemon
+Restart=on-failure
+RestartSec=15
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

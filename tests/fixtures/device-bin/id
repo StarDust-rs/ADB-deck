@@ -1,0 +1,2 @@
+#!/bin/sh
+if [ -f "$FAKE_STATE/root" ]; then echo "uid=0(root) gid=0(root) groups=0(root) context=u:r:su:s0"; else echo "uid=2000(shell) gid=2000(shell) groups=2000(shell) context=u:r:shell:s0"; fi

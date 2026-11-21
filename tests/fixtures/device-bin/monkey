@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "Events injected: 1"; echo "## Network stats: elapsed time=3ms (0ms mobile, 0ms wifi, 3ms not connected)"

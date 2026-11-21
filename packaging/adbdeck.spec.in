@@ -1,0 +1,124 @@
+# Generated from packaging/adbdeck.spec.in by packaging/build-rpm.sh.
+%bcond check 1
+
+Name:           adbdeck
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        Desktop companion for managing and debugging Android devices over adb
+
+# The crates' licenses come from `cargo metadata` of the vendored, locked
+# dependency set (the same data as %%cargo_license_summary, which is also printed
+# in the build log); Apache-2.0 is the bundled scrcpy server, OFL-1.1 the bundled fonts.
+License:        @LICENSE@ AND Apache-2.0 AND OFL-1.1
+URL:            @URL@
+Source0:        %{name}-%{version}.tar.gz
+# `cargo vendor --locked`, Windows-only crates replaced by empty stubs
+# (packaging/prune-vendor.py). Unpacks to vendor/.
+Source1:        %{name}-%{version}-vendor.tar.xz
+
+ExclusiveArch:  x86_64 aarch64
+
+BuildRequires:  cargo-rpm-macros >= 25
+BuildRequires:  cargo >= 1.85
+BuildRequires:  rust >= 1.85
+BuildRequires:  gcc
+BuildRequires:  gcc-c++
+%ifarch x86_64
+BuildRequires:  nasm
+%endif
+BuildRequires:  desktop-file-utils
+BuildRequires:  appstream
+BuildRequires:  systemd-rpm-macros
+
+# The binary links only libc, libm and libgcc_s; winit, glow and the portals load
+# these libraries at run time.
+Requires:       android-tools
+Requires:       hicolor-icon-theme
+Requires:       libxkbcommon
+Requires:       libxkbcommon-x11
+Requires:       libwayland-client
+Requires:       libwayland-cursor
+Requires:       libwayland-egl
+Requires:       libX11
+Requires:       libXcursor
+Requires:       libXrandr
+Requires:       libXi
+Requires:       libxcb
+Requires:       mesa-libGL
+Requires:       mesa-libEGL
+Recommends:     xdg-desktop-portal
+Recommends:     xdg-utils
+
+# Crates are declared by the generator from cargo-vendor.txt (a %%license file below).
+Provides:       bundled(adbplus-aya-helper) = 1.20.0
+Provides:       bundled(font(inter))
+Provides:       bundled(font(jetbrainsmono))
+Provides:       bundled(scrcpy-server) = 3.1
+
+%description
+ADB Deck is a native desktop application for working with Android devices
+through adb: device overview, file browser, app manager, process and
+performance monitors, interactive shell, logcat, layout inspector,
+screenshots, network capture, WebView inspector, Wi-Fi pairing, port mappings,
+APK signing and an embedded screen mirror (scrcpy protocol), plus per-app
+privileged actions and device controls. adb is required; apksigner and the
+Android emulator are optional external tools that are detected at run time.
+
+A windowless background service (adbdeck --daemon) reconnects remembered
+phones at login without the window being open. It is switched on by default
+and can be turned off in Settings; a systemd user unit is also provided.
+
+The application runs as the normal user and never downloads or executes
+anything from the network. Settings are stored per user under
+~/.config/adbdeck and ~/.local/share/adbdeck and are not touched by package
+removal.
+
+%prep
+%autosetup -n %{name}-%{version} -a1
+%cargo_prep -v vendor
+
+%build
+%cargo_build
+%{cargo_license_summary}
+%{cargo_license} > LICENSE.dependencies
+%{cargo_vendor_manifest}
+
+%install
+%cargo_install
+install -Dpm 0644 packaging/adbdeck.1 %{buildroot}%{_mandir}/man1/adbdeck.1
+install -Dpm 0644 packaging/adbdeck.desktop %{buildroot}%{_datadir}/applications/adbdeck.desktop
+install -Dpm 0644 packaging/adbdeck-daemon.service %{buildroot}%{_userunitdir}/adbdeck-daemon.service
+install -Dpm 0644 packaging/adbdeck.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/adbdeck.svg
+install -Dpm 0644 packaging/adbdeck-256.png %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/adbdeck.png
+install -Dpm 0644 packaging/dev.adbdeck.AdbDeck.metainfo.xml %{buildroot}%{_metainfodir}/dev.adbdeck.AdbDeck.metainfo.xml
+
+%check
+%if %{with check}
+%cargo_test
+%endif
+desktop-file-validate %{buildroot}%{_datadir}/applications/adbdeck.desktop
+appstreamcli validate --no-net --explain %{buildroot}%{_metainfodir}/dev.adbdeck.AdbDeck.metainfo.xml
+
+# The user unit is installed but not enabled by the distribution presets: the
+# login autostart entry that Settings manages starts the same service.
+%post
+%systemd_user_post adbdeck-daemon.service
+
+%preun
+%systemd_user_preun adbdeck-daemon.service
+
+%files
+%license LICENSE assets/aya/LICENSE-AGPL-3.0.txt assets/aya/NOTICE.md assets/scrcpy/LICENSE-Apache-2.0.txt assets/scrcpy/NOTICE.md assets/fonts/Inter-LICENSE.txt assets/fonts/JetBrainsMono-OFL.txt
+%license LICENSE.dependencies cargo-vendor.txt
+%doc README.md docs/ARCHITECTURE.md docs/FEATURE_INVENTORY.md
+%{_bindir}/adbdeck
+%{_mandir}/man1/adbdeck.1*
+%{_userunitdir}/adbdeck-daemon.service
+%{_datadir}/applications/adbdeck.desktop
+%{_datadir}/icons/hicolor/scalable/apps/adbdeck.svg
+%{_datadir}/icons/hicolor/256x256/apps/adbdeck.png
+%{_metainfodir}/dev.adbdeck.AdbDeck.metainfo.xml
+
+%changelog
+* @CHANGELOG_DATE@ ADB Deck Maintainers <maintainers@example.invalid> - @VERSION@-1
+- Release @VERSION@; the release notes list the changes

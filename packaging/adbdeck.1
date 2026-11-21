@@ -1,0 +1,56 @@
+.TH ADBDECK 1 "" "adbdeck" "User Commands"
+.SH NAME
+adbdeck \- desktop companion for Android Debug Bridge
+.SH SYNOPSIS
+.B adbdeck
+[\fB\-d\fR | \fB\-\-daemon\fR] [\fIAPK\fR...]
+.br
+.B adbdeck
+\fB\-h\fR | \fB\-V\fR
+.SH DESCRIPTION
+.B adbdeck
+is a graphical application for working with Android devices through
+.BR adb (1):
+device overview, file browser, app manager, process and performance monitors,
+shell, logcat, screenshots, screen mirroring, wireless pairing and more.
+The adb program must be installed.
+.PP
+APK files given on the command line are queued for installation on the selected device.
+.SH OPTIONS
+.TP
+.BR \-d ", " \-\-daemon
+Run without a window and keep remembered devices connected: phones that were connected
+before are reconnected on Wi-Fi (including phones advertising Wireless debugging), at their
+saved addresses, and on the gateways of the local networks (USB tethering, hotspot).
+Only one such service runs per user. It stops when automatic reconnection or the background
+service is switched off in Settings. The window starts this service at login through an
+autostart entry while the setting is on.
+.TP
+.BR \-h ", " \-\-help
+Show a short help text.
+.TP
+.BR \-V ", " \-\-version
+Show the version.
+.SH FILES
+.TP
+.I ~/.config/adbdeck/settings.toml
+Settings.
+.TP
+.I ~/.local/share/adbdeck/data.json
+Remembered devices and window state.
+.TP
+.I ~/.config/autostart/adbdeck-daemon.desktop
+Starts the background service at login. Written and removed by Settings.
+.TP
+.I /usr/lib/systemd/user/adbdeck-daemon.service
+The same service as a systemd user unit. Enable it with
+.BR "systemctl \-\-user enable \-\-now adbdeck-daemon" .
+.SH ENVIRONMENT
+.TP
+.B RUST_LOG
+Log level, for example
+.BR adbdeck=debug .
+The default is
+.BR adbdeck=info .
+.SH SEE ALSO
+.BR adb (1)

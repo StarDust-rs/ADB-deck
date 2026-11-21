@@ -1,0 +1,218 @@
+name: Release
+
+# Publish a GitHub release for a new tag (for example v1.0.0) and this workflow
+# builds the RPMs from that commit, attaches them to the release and writes the
+# release notes from the commit titles since the previous release.
+# See docs/RELEASING.md.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild and publish again, for example v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  # Releases are cut from this branch only.
+  MAIN_BRANCH: main
+
+jobs:
+  # Checks that the tag may be released and writes the release notes.
+  prepare:
+    name: Check tag and write release notes
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      epoch: ${{ steps.check.outputs.epoch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0
+
+      - name: Check the tag
+        id: check
+        shell: bash
+        run: |
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::The tag '$TAG' is not a version tag. Use vMAJOR.MINOR.PATCH, for example v1.0.0."
+            exit 1
+          fi
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          # The commit time stamps the tarballs, the changelog entry and the build time.
+          echo "epoch=$(git log -1 --format=%ct)" >> "$GITHUB_OUTPUT"
+          if ! git merge-base --is-ancestor HEAD "origin/$MAIN_BRANCH"; then
+            echo "::error::The tag '$TAG' is not on '$MAIN_BRANCH'. Create the release from '$MAIN_BRANCH'."
+            exit 1
+          fi
+
+      - name: Write the release notes
+        run: packaging/release-notes.sh "$TAG" > release-notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  # Builds, tests (the spec's %check runs the test suite and validates the desktop
+  # file and the AppStream metadata) and smoke-installs the RPMs inside each
+  # supported Fedora release, once per architecture.
+  build:
+    name: RPM (Fedora ${{ matrix.fedora }}, ${{ matrix.arch }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    container:
+      image: registry.fedoraproject.org/fedora:${{ matrix.fedora }}
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.prepare.outputs.epoch }}
+      ADBDECK_URL: ${{ github.server_url }}/${{ github.repository }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Fedora supports two releases at a time; add the next one when it ships.
+        include:
+          - { fedora: "45", arch: x86_64, runner: ubuntu-latest, srpm: true }
+          # Remove the aarch64 entries to release for x86_64 only.
+          - { fedora: "45", arch: aarch64, runner: ubuntu-24.04-arm, srpm: false }
+          - { fedora: "44", arch: x86_64, runner: ubuntu-latest, srpm: false }
+          - { fedora: "44", arch: aarch64, runner: ubuntu-24.04-arm, srpm: false }
+    steps:
+      - name: Install build tools
+        run: |
+          dnf -y install git rpm-build redhat-rpm-config cargo-rpm-macros cargo rust \
+            gcc gcc-c++ desktop-file-utils appstream systemd-rpm-macros rpmlint \
+            python3 tar gzip xz gawk sed findutils procps-ng which
+          # nasm assembles x86 code only, and the spec asks for it on x86_64 only.
+          if [ "$(uname -m)" = x86_64 ]; then dnf -y install nasm; fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Stamp the version from the tag
+        run: python3 packaging/set-version.py "${{ needs.prepare.outputs.version }}"
+
+      - name: Build the RPMs
+        run: sh packaging/build-rpm.sh ".fc${{ matrix.fedora }}"
+
+      - name: Select the packages to publish
+        run: |
+          mkdir -p out
+          # The debuginfo and debugsource packages stay in the build tree.
+          find dist/rpmbuild/RPMS -name 'adbdeck-[0-9]*.rpm' ! -name '*debuginfo*' ! -name '*debugsource*' -exec cp {} out/ \;
+          if [ "${{ matrix.srpm }}" = "true" ]; then
+            cp dist/rpmbuild/SRPMS/*.src.rpm out/
+          fi
+          ls -l out
+          test "$(ls out/adbdeck-*.fc${{ matrix.fedora }}.${{ matrix.arch }}.rpm | wc -l)" = 1
+
+      - name: Install it and check what it ships
+        run: |
+          rpm=$(ls out/adbdeck-*.fc${{ matrix.fedora }}.${{ matrix.arch }}.rpm)
+          rpm -qip "$rpm"
+          rpm -qlp "$rpm"
+          rpm -qp --provides "$rpm"
+          rpm -qp --requires "$rpm"
+          dnf -y install "$rpm"
+          test "$(adbdeck --version)" = "adbdeck ${{ needs.prepare.outputs.version }}"
+          adbdeck --help
+          test -f /usr/lib/systemd/user/adbdeck-daemon.service
+          ls /usr/share/man/man1/adbdeck.1*
+          desktop-file-validate /usr/share/applications/adbdeck.desktop
+          appstreamcli validate --no-net --explain /usr/share/metainfo/dev.adbdeck.AdbDeck.metainfo.xml
+          rpm -V adbdeck
+
+      - name: Lint the packages (for information)
+        continue-on-error: true
+        run: |
+          rpmlint out/*.rpm 2>&1 | tee rpmlint.txt
+          { echo '### rpmlint, Fedora ${{ matrix.fedora }} ${{ matrix.arch }}'; echo '```'; tail -n 40 rpmlint.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-fc${{ matrix.fedora }}-${{ matrix.arch }}
+          path: out/*.rpm
+          if-no-files-found: error
+
+  # Attaches the RPMs to the release and fills in its notes.
+  publish:
+    name: Publish to the release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rpm-*
+          path: files
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      # A signed statement of where and how the files were built; `gh attestation
+      # verify FILE --repo OWNER/REPO` checks it. Needs a public repository (or GitHub Enterprise).
+      - uses: actions/attest-build-provenance@v3
+        if: ${{ !github.event.repository.private }}
+        with:
+          subject-path: files/*.rpm
+
+      - name: Write the release text
+        shell: bash
+        run: |
+          marker='<!-- adbdeck-release-notes -->'
+          cd files
+          sha256sum -- *.rpm > SHA256SUMS
+          cd ..
+
+          # Text the author typed into the release stays; the generated part is
+          # rewritten, so running this again does not pile up notes.
+          existing=$(gh release view "$TAG" --json body --jq .body 2>/dev/null || true)
+          intro=${existing%%"$marker"*}
+
+          {
+            if [[ "$intro" =~ [^[:space:]] ]]; then
+              printf '%s\n\n' "$intro"
+            fi
+            echo "$marker"
+            cat release-notes.md
+            echo
+            echo '### Install'
+            echo
+            echo 'On Fedora 44 or 45, download the RPM for your release and architecture and run:'
+            echo
+            echo '```'
+            echo 'sudo dnf install ./adbdeck-*.fc$(rpm -E %fedora).$(uname -m).rpm'
+            echo '```'
+            echo
+            echo '`SHA256SUMS` lists the checksums of the files. `*.src.rpm` is the source package; it contains the vendored crates and builds offline.'
+          } > release-body.md
+
+      - name: Publish the files and the notes
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" files/* --clobber
+            gh release edit "$TAG" --notes-file release-body.md
+          else
+            # A manual run for a tag that has no release yet.
+            gh release create "$TAG" files/* --verify-tag --title "ADB Deck ${TAG}" --notes-file release-body.md
+          fi

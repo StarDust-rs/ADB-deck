@@ -1,0 +1,10 @@
+Packages:
+  Package [com.example.app] (1a2b3c):
+    requested permissions:
+      android.permission.INTERNET
+      android.permission.CAMERA
+    install permissions:
+      android.permission.INTERNET: granted=true
+    User 0: ceDataInode=123 installed=true
+      runtime permissions:
+        android.permission.CAMERA: granted=false, flags=[ USER_SET ]

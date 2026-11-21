@@ -1,0 +1,141 @@
+#!/bin/sh
+# A stand-in for `adb` that simulates one Android device on the host.
+# Used by the integration tests and for trying the UI without hardware.
+#
+#   FAKE_ADB_HOME     state directory (default: a per-user dir under $TMPDIR)
+#   FAKE_ADB_DEVICES  lines "serial<TAB>state[<TAB>details]" (default: one Pixel 7)
+#   FAKE_ADB_MODE     timeout | exit1 | garbage  (fault injection)
+#   FAKE_ADB_LOG      file that receives one line per invocation
+#   FAKE_ADB_TRACK_ENDS=1  make `track-devices` end after its first message
+here=$(cd "$(dirname "$0")" && pwd)
+export FAKE_FIXTURES="$here"
+home=${FAKE_ADB_HOME:-${TMPDIR:-/tmp}/fake-adb-$(id -u)}
+export FAKE_STATE="$home/state"
+root="$home/root"
+if [ ! -d "$root/sdcard" ]; then
+  mkdir -p "$root/sdcard/DCIM" "$root/sdcard/Download" "$root/sdcard/Documents" "$root/tmp" "$FAKE_STATE"
+  cp "$here/data/screen.png" "$root/sdcard/DCIM/screen.png"
+  printf 'Fake device notes\n' > "$root/sdcard/Documents/notes.txt"
+  printf 'x' > "$root/sdcard/Download/readme.md"
+fi
+mkdir -p "$FAKE_STATE"
+[ -n "$FAKE_ADB_LOG" ] && printf '%s\n' "$*" >> "$FAKE_ADB_LOG"
+
+case "$FAKE_ADB_MODE" in
+  timeout) exec sleep 600;;
+  exit1) echo "adb: simulated failure" >&2; exit 1;;
+  garbage) echo "zzz not adb output"; exit 0;;
+esac
+
+devices=${FAKE_ADB_DEVICES-"FAKE0001	device	usb:1-1 product:panther model:Pixel_7 device:panther transport_id:1"}
+# A file next to the state can replace the device list while a test runs.
+[ -f "$home/devices" ] && devices=$(cat "$home/devices")
+serial=""
+if [ "$1" = "-s" ]; then serial="$2"; shift 2; fi
+cmd="$1"; [ $# -gt 0 ] && shift
+
+# FAKE_ADB_FLAKY=N: the first N `shell` calls fail the way adb does while its server restarts.
+if [ "$cmd" = shell ] && [ -n "$FAKE_ADB_FLAKY" ]; then
+  n=$(cat "$FAKE_STATE/flaky" 2>/dev/null || echo 0)
+  if [ "$n" -lt "$FAKE_ADB_FLAKY" ]; then
+    echo $((n + 1)) > "$FAKE_STATE/flaky"
+    echo "error: protocol fault (couldn't read status): Connection reset by peer" >&2
+    exit 1
+  fi
+fi
+
+known() { printf '%s\n' "$devices" | awk -F'\t' -v s="$1" '$1==s && $2=="device" {f=1} END{exit !f}'; }
+need_device() {
+  if [ -z "$serial" ]; then serial=$(printf '%s\n' "$devices" | awk -F'\t' '$2=="device"{print $1; exit}'); fi
+  if ! known "$serial"; then echo "adb: device '$serial' not found" >&2; exit 1; fi
+  export FAKE_SERIAL="$serial"
+  export PATH="$here/device-bin:$PATH"
+  export TIME_STYLE=long-iso LC_ALL=C
+}
+# Maps device paths into the simulated file system.
+map() { printf '%s' "$1" | sed "s#^/sdcard#$root/sdcard#; s#^/data/local/tmp#$root/tmp#; s#^/data/app#$root/app#; s#^/storage/self/primary#$root/sdcard#"; }
+progress() { printf '[ 50%%] %s\r[100%%] %s\r\n' "$1" "$1"; }
+
+case "$cmd" in
+  devices)
+    echo "List of devices attached"
+    printf '%s\n' "$devices" | awk -F'\t' 'NF>=2 { printf "%-19s %s", $1, $2; if (NF>=3) printf " %s", $3; printf "\n" }'
+    echo;;
+  track-devices)
+    payload=$(printf '%s\n' "$devices" | awk -F'\t' 'NF>=2 {printf "%s\t%s\n",$1,$2}')
+    printf '%04x%s' "${#payload}" "$payload"
+    [ "$FAKE_ADB_TRACK_ENDS" = 1 ] && exit 0
+    sleep 86400;;
+  kill-server) exit 0;;
+  start-server) echo "* daemon started successfully"; exit 0;;
+  reboot) need_device; printf 'adb reboot %s\n' "$*" >> "$FAKE_STATE/control.log";;
+  connect)
+    # A test can make `connect` bring devices back by leaving the list to restore in $home/on-connect.
+    [ -f "$home/on-connect" ] && cp "$home/on-connect" "$home/devices"
+    echo "connected to $1";;
+  disconnect) echo "disconnected $1";;
+  mdns)
+    # `mdns services` lists the rows in $home/mdns (tab separated), if the file exists.
+    echo "List of discovered mdns services"
+    [ -f "$home/mdns" ] && cat "$home/mdns";;
+  pair) read -r code; echo "Successfully paired to $1 [guid=adb-fake]";;
+  forward)
+    need_device 2>/dev/null
+    list="$FAKE_STATE/forwards"
+    case "$1" in
+      --list) [ -f "$list" ] && cat "$list"; exit 0;;
+      --remove) grep -v "^[^ ]* $2 " "$list" > "$list.tmp" 2>/dev/null; mv "$list.tmp" "$list" 2>/dev/null; exit 0;;
+    esac
+    if [ "$1" = "tcp:0" ]; then
+      # The Aya helper's abstract socket is served by the test process on $FAKE_AYA_PORT.
+      if [ "$2" = "localabstract:aya" ] && [ -n "$FAKE_AYA_PORT" ]; then echo "$FAKE_AYA_PORT"; else echo 40123; fi
+      exit 0
+    fi
+    echo "${serial:-FAKE0001} $1 $2" >> "$list";;
+  shell)
+    need_device
+    if [ $# -eq 0 ]; then
+      cd "$root/sdcard" || exit 1
+      PS1='fake:/sdcard $ ' ENV= exec sh -i
+    fi
+    script=$(printf '%s' "$*" | sed "s#/storage/emulated/0#/sdcard#g; s#/data/local/tmp#$root/tmp#g; s#/data/app#$root/app#g; s#/sdcard#$root/sdcard#g")
+    exec sh -c "$script";;
+  exec-out)
+    need_device
+    # Device paths in the arguments are mapped like everywhere else.
+    n=$#; while [ "$n" -gt 0 ]; do a=$1; shift; set -- "$@" "$(map "$a")"; n=$((n - 1)); done
+    exec "$@";;
+  install)
+    need_device
+    for last; do :; done
+    case "$last" in
+      *bad*) echo "adb: failed to install $last: Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]" >&2; exit 1;;
+    esac
+    echo "Performing Streamed Install"; echo "Success";;
+  uninstall) need_device; echo "Success";;
+  root) need_device
+    if [ -f "$FAKE_STATE/noroot" ]; then echo "adbd cannot run as root in production builds"; exit 0; fi
+    touch "$FAKE_STATE/root"; echo "restarting adbd as root";;
+  tcpip) need_device; echo "restarting in TCP mode port: $1";;
+  logcat) need_device; exec logcat "$@";;
+  push)
+    need_device
+    dest=$(map "$2"); cp -r "$1" "$dest" || { echo "adb: error: failed to copy '$1' to '$2'" >&2; exit 1; }
+    progress "$2"; echo "$1: 1 file pushed, 0 skipped.";;
+  pull)
+    need_device
+    src=$(map "$1")
+    [ -e "$src" ] || { echo "adb: error: failed to stat remote object '$1': No such file or directory" >&2; exit 1; }
+    cp -r "$src" "$2" || exit 1
+    progress "$1"; echo "$1: 1 file pulled, 0 skipped.";;
+  reverse)
+    need_device
+    list="$FAKE_STATE/reverses"
+    case "$1" in
+      --list) [ -f "$list" ] && sed 's/^/(reverse) /' "$list"; exit 0;;
+      --remove) grep -v "^$2 " "$list" > "$list.tmp" 2>/dev/null; mv "$list.tmp" "$list" 2>/dev/null; exit 0;;
+    esac
+    echo "$1 $2" >> "$list";;
+  emu) need_device; echo "OK: killing emulator, bye bye";;
+  *) echo "adb: unknown command $cmd" >&2; exit 1;;
+esac

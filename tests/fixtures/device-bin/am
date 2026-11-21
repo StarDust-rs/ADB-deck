@@ -1,0 +1,11 @@
+#!/bin/sh
+case "$1" in
+  get-current-user) echo 0;;
+  force-stop) echo "$2" >> "$FAKE_STATE/stopped.log";;
+  get-standby-bucket) cat "$FAKE_STATE/bucket" 2>/dev/null || echo 10;;
+  set-standby-bucket)
+    case "$3" in active) echo 10;; working_set) echo 20;; frequent) echo 30;; rare) echo 40;; restricted) echo 45;; *) echo "Error: bad bucket";; esac > "$FAKE_STATE/bucket";;
+  kill) echo "$2" >> "$FAKE_STATE/killed.log";;
+  start) printf '%s\n' "$*" >> "$FAKE_STATE/started.log"; echo "Starting: Intent { $* }";;
+  *) :;;
+esac

@@ -1,0 +1,2 @@
+#!/bin/sh
+printf 'shell reboot %s\n' "$*" >> "$FAKE_STATE/control.log"

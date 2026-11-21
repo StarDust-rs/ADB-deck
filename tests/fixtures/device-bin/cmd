@@ -1,0 +1,15 @@
+#!/bin/sh
+case "$1 $2" in
+  "deviceidle whitelist")
+    case "$3" in
+      +*) echo "${3#+}" >> "$FAKE_STATE/idle"; echo "Added: ${3#+}";;
+      -*) grep -vx "${3#-}" "$FAKE_STATE/idle" > "$FAKE_STATE/idle.new" 2>/dev/null; mv "$FAKE_STATE/idle.new" "$FAKE_STATE/idle"; echo "Removed: ${3#-}";;
+    esac;;
+  "package compile") printf '%s\n' "$*" >> "$FAKE_STATE/compile.log"; echo Success;;
+  "package install-existing") printf '%s\n' "$*" >> "$FAKE_STATE/pm.log"; echo "Package $5 installed for user: 0";;
+  "uimode night")
+    f="$FAKE_STATE/night"
+    if [ -n "$3" ]; then printf '%s\n' "$3" > "$f"; printf 'cmd %s\n' "$*" >> "$FAKE_STATE/control.log"; echo "Night mode: $3"; else echo "Night mode: $(cat "$f" 2>/dev/null || echo auto)"; fi;;
+  "connectivity airplane-mode"|"statusbar expand-notifications"|"statusbar expand-settings"|"statusbar collapse")
+    printf 'cmd %s\n' "$*" >> "$FAKE_STATE/control.log";;
+esac

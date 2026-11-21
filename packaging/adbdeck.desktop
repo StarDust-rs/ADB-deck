@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=ADB Deck
+GenericName=Android Debug Bridge companion
+Comment=Manage and debug Android devices over adb
+Exec=adbdeck %F
+Icon=adbdeck
+Terminal=false
+Categories=Development;Debugger;
+Keywords=android;adb;debug;mirror;permissions;apk;logcat;
+MimeType=application/vnd.android.package-archive;
+StartupNotify=true
+StartupWMClass=adbdeck

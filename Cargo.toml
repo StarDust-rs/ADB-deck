@@ -1,0 +1,51 @@
+[package]
+name = "adbdeck"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Desktop companion for Android Debug Bridge (ADB) on Linux"
+license = "GPL-3.0-or-later AND AGPL-3.0-only AND Apache-2.0 AND BSD-2-Clause"
+repository = "https://example.invalid/adbdeck"
+publish = false
+
+[lib]
+name = "adbdeck"
+path = "src/lib.rs"
+
+[[bin]]
+name = "adbdeck"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.31", default-features = false, features = ["glow", "wayland", "x11", "accesskit", "default_fonts"] }
+egui = { version = "0.31", default-features = false, features = ["default_fonts"] }
+egui_extras = { version = "0.31", default-features = false }
+egui_plot = "0.31"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "time", "sync", "macros", "fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
+directories = "5"
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+portable-pty = "0.8"
+vt100 = "0.15"
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+ureq = { version = "2", default-features = false }
+roxmltree = "0.20"
+keyring = { version = "3", default-features = false, features = ["async-secret-service", "async-io", "crypto-rust"] }
+openh264 = "0.9"
+egui-phosphor = { version = "=0.9.0", default-features = false, features = ["regular", "fill"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["test-util"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
+opt-level = 3
