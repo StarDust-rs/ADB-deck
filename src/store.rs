@@ -38,6 +38,8 @@ pub struct Settings {
     /// Start the windowless background service at login so remembered devices are
     /// connected without ADB Deck being open (see `autostart` and `daemon`).
     pub background_service: bool,
+    /// Look up app icons and names on the Play Store (sends package names to the icon service).
+    pub fetch_app_icons: bool,
 }
 
 impl Default for Settings {
@@ -49,6 +51,7 @@ impl Default for Settings {
             kill_adb_on_exit: false,
             auto_reconnect: true,
             background_service: true,
+            fetch_app_icons: true,
         }
     }
 }

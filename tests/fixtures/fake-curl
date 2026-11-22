@@ -1,0 +1,22 @@
+#!/bin/sh
+# Stands in for `curl` and the Play Store metadata service behind it. The test points
+# $FAKE_CURL_DIR at a directory holding what the "service" knows:
+#   listing/<package>.json    the JSON answer for /json?id=<package>
+#   listing/<package>.status  a bare HTTP status to answer with instead (no body)
+#   icons/<name>              the bytes served for https://play-lh.googleusercontent.com/<name>
+# Every requested address is appended to $FAKE_CURL_DIR/calls.log. FAKE_CURL_FAIL=1 makes
+# the program fail like a curl that cannot reach the network.
+if [ -n "$FAKE_CURL_FAIL" ]; then echo "curl: (6) Could not resolve host" >&2; exit 6; fi
+for arg in "$@"; do url="$arg"; done
+echo "$url" >> "$FAKE_CURL_DIR/calls.log"
+case "$url" in
+  https://play.rajkumaar.co.in/json\?id=*)
+    package=${url#*id=}
+    if [ -f "$FAKE_CURL_DIR/listing/$package.json" ]; then cat "$FAKE_CURL_DIR/listing/$package.json"; printf '\n200'
+    elif [ -f "$FAKE_CURL_DIR/listing/$package.status" ]; then printf '\n%s' "$(cat "$FAKE_CURL_DIR/listing/$package.status")"
+    else printf '\n404'; fi;;
+  https://play-lh.googleusercontent.com/*)
+    name=${url#https://play-lh.googleusercontent.com/}
+    if [ -f "$FAKE_CURL_DIR/icons/$name" ]; then cat "$FAKE_CURL_DIR/icons/$name"; printf '\n200'; else printf '\n404'; fi;;
+  *) printf '\n404';;
+esac

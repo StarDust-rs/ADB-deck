@@ -1,6 +1,6 @@
 #!/bin/sh
-# Stands in for `app_process /system/bin io.liriliri.aya.Server`: records that the helper
-# was started, then stays alive like the real server (or dies at once when asked to).
-if [ -n "$FAKE_AYA_CRASH" ]; then echo "Aborting: class io.liriliri.aya.Server not found" >&2; exit 1; fi
-touch "$FAKE_STATE/aya-started"
+# Stands in for `app_process /system/bin com.genymobile.scrcpy.Server`: records that the server
+# was started, then stays alive like the real one (or dies at once when asked to).
+if [ -n "$FAKE_SERVER_CRASH" ]; then echo "Aborting: class com.genymobile.scrcpy.Server not found" >&2; exit 1; fi
+touch "$FAKE_STATE/server-started"
 exec sleep 86400

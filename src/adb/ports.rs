@@ -69,19 +69,6 @@ impl DeviceAdb {
         self.checked(["forward", l.as_str(), r.as_str()]).await
     }
 
-    /// `adb forward tcp:0 <remote>`: lets adb pick a free host port and returns it.
-    pub async fn forward_dynamic(&self, remote: &str) -> Result<u16> {
-        let r = normalize_endpoint(remote)?;
-        let out = self.exec(["forward", "tcp:0", r.as_str()]).await?;
-        if !out.success() {
-            return Err(Error::Exit { program: "adb".into(), code: out.code, message: out.failure_message() });
-        }
-        out.stdout_text()
-            .trim()
-            .parse::<u16>()
-            .map_err(|_| Error::parse("adb forward", format!("no port in {:?}", out.stdout_text().trim())))
-    }
-
     /// Makes `remote` (device side) connect to `local` (host side).
     pub async fn reverse(&self, remote: &str, local: &str) -> Result<()> {
         let (r, l) = (normalize_endpoint(remote)?, normalize_endpoint(local)?);

@@ -112,6 +112,12 @@ impl SettingsPanel {
                 kit::toggle(ui, &mut draft.kill_adb_on_exit, "Stop the adb server when ADB Deck closes (not while the background service is on)");
                 kit::toggle(ui, &mut draft.auto_reconnect, "Find and reconnect Wi-Fi devices automatically (applies after a restart)");
                 kit::toggle(ui, &mut draft.background_service, "Keep devices connected in the background (starts at login, no window)");
+                kit::toggle(ui, &mut draft.fetch_app_icons, "Fetch app icons and names from the Play Store");
+                ui.label(
+                    RichText::new("Sends the package names of the apps shown to play.rajkumaar.co.in and downloads icons from Google, using the curl program.")
+                        .size(11.5)
+                        .color(theme::pal(ui).text3),
+                );
             });
             ui.add_space(12.0);
 
@@ -170,14 +176,14 @@ impl SettingsPanel {
                         ui.spacing_mut().item_spacing.y = 3.0;
                         ui.label(kit::semibold("ADB Deck").size(22.0));
                         ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).color(p.text2));
-                        ui.label(RichText::new("GPL-3.0-or-later and AGPL-3.0-only; bundles the scrcpy server (Apache-2.0) and OpenH264 (BSD-2-Clause)").size(12.0).color(p.text3));
+                        ui.label(RichText::new("GPL-3.0-or-later; bundles the scrcpy server (Apache-2.0) and OpenH264 (BSD-2-Clause)").size(12.0).color(p.text3));
                     });
                 });
                 ui.add_space(10.0);
                 ui.add(
                     egui::Label::new(
                         RichText::new(
-                            "A desktop companion for Android Debug Bridge on Linux, written in Rust. It reimplements the workflows of ADBPlus and uses ADBPlus' on-device helper (AGPL-3.0) to show app icons and names. Screen mirroring speaks the scrcpy protocol with the bundled scrcpy 3.1 server.",
+                            "A desktop companion for Android Debug Bridge on Linux, written in Rust. It reimplements the workflows of ADBPlus. App icons and names come from the Play Store through an open source metadata service. Screen mirroring speaks the scrcpy protocol with the bundled scrcpy 3.1 server.",
                         )
                         .color(p.text2),
                     )

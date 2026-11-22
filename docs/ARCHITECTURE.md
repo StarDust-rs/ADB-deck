@@ -1,9 +1,7 @@
 # Architecture
 
 ADB Deck is one Cargo package with a library (`adbdeck`) and a binary
-(`adbdeck`): a modular monolith. The only part of ADBPlus used is its on-device helper
-(`assets/aya/`) and a Rust port of the client for it (`src/aya.rs`), both AGPL-3.0; see
-"App icons" below.
+(`adbdeck`): a modular monolith.
 
 ```
 src/
@@ -128,32 +126,25 @@ the Files preview pane hides itself, and the Remote control cards stack.
 
 ### App icons and names
 
-Android has no command that returns an app's icon or label, so ADB Deck uses the same
-approach as ADBPlus: a small helper (`aya.dex`, bundled unchanged in `assets/aya/`) runs on
-the phone inside Android and renders them.
+Android has no command that returns an app's icon or label, so they come from the Play Store through the open
+source metadata API at `play.rajkumaar.co.in` (MIT; `github.com/rajkumaar23/playstore-api`).
 
-* `aya` is the client. `Helper::start` forwards the helper's abstract socket
-  (`adb forward tcp:0 localabstract:aya`). If nothing answers it pushes the bundled dex to
-  `/data/local/tmp/aya/`, starts it with `app_process` (kept as a child `adb shell`
-  session) and waits up to 15 s (a helper that is not answering is killed first; a failed start
-  reports the device log's last `aya`/`AndroidRuntime` lines). The protocol is length-delimited Protobuf `Request` /
-  `Response` messages carrying JSON; `aya::wire` encodes them by hand. `getPackageInfos`
-  returns a label and the device path of a rendered PNG per package.
-* The icon file is read with `adb exec-out cat` (bounded to 8 MiB, only paths under
-  `/data/local/tmp/aya/icons/`). The helper's HTTP file server, which ADBPlus uses for this,
-  is never started: it listens on every network interface of the phone without
-  authentication.
-* `appicon::fetch_batch` asks the cache first, then makes one `getPackageInfos` call for all
-  missing apps. Results, including "this app has no icon", are cached under
-  `$XDG_CACHE_HOME/adbdeck/icons` (`<package>-<version code>.png|.none` plus `.label`).
-  A device or transfer failure is not cached.
-* `ui::app_icons` queues only the rows on screen, runs one batch at a time on a helper shared
-  per device, and draws the 96 px icon (a 48 px variant in rows). Without an icon the letter
-  badge stays; when the helper cannot start, the details panel says so and Reload retries.
-* The helper is stopped (forward removed, `pkill` of the server) when the device panel is
-  dropped and on exit. If ADB Deck is killed, the helper keeps running on the phone until the
-  phone restarts, exactly as with ADBPlus. While it runs, any app on the phone can reach its
-  abstract socket, which includes the (unused here) `startFileServer` call.
+* `appicon::PlayStore` makes the requests with the system's `curl` (no TLS stack in the program; the system's
+  certificates and crypto policy apply): `GET https://play.rajkumaar.co.in/json?id=<package>` for the listing
+  (`name`, `logo`), then the `logo` address for the icon. Only validated package names are sent (letters,
+  digits, `.`, `_`, `-`, at most 200). The icon address is only followed when it is an `https` address on
+  `play-lh.googleusercontent.com` made of plain URL characters, and curl is limited to `https`
+  (`--proto =https --proto-redir =https`), three redirects, 15 s and a size cap. Status 404 and 400 mean "not on the
+  Play Store"; anything else, and any curl failure, is a failed lookup.
+* `appicon::fetch_batch` asks the cache first, then the service for what is missing or old, at most three requests
+  at a time. Files per package under `$XDG_CACHE_HOME/adbdeck/icons/play`: `<package>.png` + `.label` (kept 30
+  days; an old icon is still shown when the refresh fails), `.none` (not on the Play Store, one day), `.failed`
+  (ten minutes; "Retry" ignores it).
+* `ui::app_icons` queues only the rows on screen, runs one batch of nine at a time and draws the 96 px icon (a
+  48 px variant in rows). The store title is used as the app's name in the details panel. Without an icon the
+  letter badge stays; when no lookup of a batch got an answer the Apps panel shows a banner with Retry.
+* `Settings.fetch_app_icons` (default on) switches the network lookups off; the cache is still read. Toggling it
+  lets apps that had no answer ask again.
 
 Fonts are OFL-1.1 (`assets/fonts/*LICENSE*`); the icon font comes with the `egui-phosphor` crate
 (MIT). Both are declared in the RPM (`License`, `Provides: bundled(...)`, `%license`).

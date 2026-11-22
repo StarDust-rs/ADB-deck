@@ -4,7 +4,6 @@ pub mod adb;
 pub mod appicon;
 pub mod autostart;
 pub mod avd;
-pub mod aya;
 pub mod daemon;
 pub mod desktop;
 pub mod error;

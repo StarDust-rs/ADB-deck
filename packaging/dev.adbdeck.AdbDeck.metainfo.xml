@@ -7,7 +7,7 @@
     <name>ADB Deck Maintainers</name>
   </developer>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>GPL-3.0-or-later AND AGPL-3.0-only</project_license>
+  <project_license>GPL-3.0-or-later</project_license>
   <description>
     <p>ADB Deck is a desktop companion for Android Debug Bridge. It lists connected devices and offers a file browser, app manager, process list, live performance charts, an interactive shell, a layout inspector, screenshots, a log viewer, packet capture, WebView inspection, an on-screen remote control, wireless connection and pairing, port forwarding, APK signing and screen mirroring.</p>
     <p>Phones that were connected once are remembered and reconnected after a restart, on Wi-Fi, over USB tethering or on a hotspot, by a background service that needs no open window.</p>

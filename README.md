@@ -3,8 +3,8 @@
 A native Rust desktop application for managing and debugging Android devices
 through `adb`, built for Fedora Linux with KDE Plasma (Wayland first, X11 also
 supported). It reimplements the *workflows* of the ADBPlus project in Rust with no
-Electron/JS runtime, and reuses one piece of it: ADBPlus' on-device "aya" helper and the
-client protocol for it, which supply app icons and names (see "Licence").
+Electron/JS runtime. App icons and names come from the Play Store through an open source
+metadata service (see "App icons").
 
 Features: device overview, file browser (upload/download with progress, preview),
 app manager (install queue, drag-and-drop, uninstall, clear, permissions,
@@ -48,6 +48,17 @@ for installation on the selected device). `--help` and `--version` are supported
 Publishing a GitHub release with a new tag such as `v1.0.0` builds the Fedora 45 x86_64 RPM from `main`, attaches
 it to the release and writes the notes from the commit titles since the last release. See
 [docs/RELEASING.md](docs/RELEASING.md).
+
+## App icons
+
+Android has no command that returns an app's icon, so ADB Deck looks apps up on the Play Store through the
+open source metadata API at [play.rajkumaar.co.in](https://play.rajkumaar.co.in) (MIT,
+[source](https://github.com/rajkumaar23/playstore-api)): `GET /json?id=<package>` returns the store title and the
+address of the icon, which is then downloaded from Google's image server. **Only the package names of the apps shown
+are sent.** Apps that are not on the Play Store (system apps, sideloaded builds) keep a letter badge. The requests are
+made by the system's `curl`; results are cached under `~/.cache/adbdeck/icons/play` (icons for 30 days, unknown apps
+for a day, failures for ten minutes). *Settings → Fetch app icons and names from the Play Store* switches the
+lookups off; icons already cached are still shown.
 
 ## Keeping a phone connected (background service)
 
@@ -114,9 +125,6 @@ Removal leaves `~/.config/adbdeck` and `~/.local/share/adbdeck` in place.
 
 ## Licence
 
-GPL-3.0-or-later (see `LICENSE`), **combined with AGPL-3.0-only** for the parts taken from
-ADBPlus: `assets/aya/` (the prebuilt helper `aya.dex`, its Kotlin source and licence text) and
-`src/aya.rs`, a port of ADBPlus' client for it. The combined program is therefore distributed
-under the AGPL's terms as well, including its offer of corresponding source for users who
-interact with it over a network. See `assets/aya/NOTICE.md`. Third-party crates keep their
-own licences; the RPM's `License:` field lists them.
+GPL-3.0-or-later (see `LICENSE`). The scrcpy server it bundles for screen mirroring is Apache-2.0
+(`assets/scrcpy/`), the fonts are OFL-1.1 (`assets/fonts/`). Third-party crates keep their own
+licences; the RPM's `License:` field lists them.

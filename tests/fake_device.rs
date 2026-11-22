@@ -649,176 +649,6 @@ async fn wait_for(mut cond: impl FnMut() -> bool, limit: Duration) -> bool {
     cond()
 }
 
-/// What the stand-in helper knows about one app: `(package, label, icon file on the device)`.
-type FakeApp = (&'static str, &'static str, Option<&'static str>);
-
-/// A stand-in for the Aya helper on the phone. It speaks the real wire protocol
-/// on a local port (the fake adb forwards `localabstract:aya` to it) but, like a
-/// helper that is not running yet, drops connections until the fake
-/// `app_process` has been started.
-struct FakeAya {
-    log: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Drop for FakeAya {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-impl FakeAya {
-    fn calls(&self) -> Vec<String> {
-        self.log.lock().unwrap().clone()
-    }
-}
-
-/// Binds the helper's port before the fake adb exists, because the adb wrapper must know it.
-async fn bind_aya() -> (tokio::net::TcpListener, u16) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    (listener, port)
-}
-
-fn serve_aya(listener: tokio::net::TcpListener, started: PathBuf, apps: Vec<FakeApp>) -> FakeAya {
-    use adbdeck::aya::wire::{decode_request, encode_response, Response};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let shared = log.clone();
-    let task = tokio::spawn(async move {
-        loop {
-            let Ok((mut stream, _)) = listener.accept().await else { return };
-            if !started.exists() {
-                continue; // nothing listens on the abstract socket yet: adb closes the connection
-            }
-            let (log, apps) = (shared.clone(), apps.clone());
-            tokio::spawn(async move {
-                let mut pending = Vec::new();
-                let mut chunk = [0u8; 4096];
-                loop {
-                    while let Some((request, used)) = decode_request(&pending).unwrap() {
-                        pending.drain(..used);
-                        log.lock().unwrap().push(request.method.clone());
-                        let result = match request.method.as_str() {
-                            "getVersion" => serde_json::json!({ "version": "1.20.0" }),
-                            "getPackageInfos" => {
-                                let params: serde_json::Value = serde_json::from_str(&request.params).unwrap();
-                                let asked: Vec<&str> =
-                                    params["packageNames"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
-                                let infos: Vec<_> = apps
-                                    .iter()
-                                    .filter(|(package, ..)| asked.contains(package))
-                                    .map(|(package, label, icon)| {
-                                        serde_json::json!({ "packageName": package, "label": label, "icon": icon.unwrap_or(""), "apkSize": 1 })
-                                    })
-                                    .collect();
-                                serde_json::json!({ "packageInfos": infos })
-                            }
-                            _ => serde_json::json!({}),
-                        };
-                        let reply = Response { id: request.id, result: result.to_string() };
-                        if stream.write_all(&encode_response(&reply)).await.is_err() {
-                            return;
-                        }
-                    }
-                    match stream.read(&mut chunk).await {
-                        Ok(0) | Err(_) => return,
-                        Ok(n) => pending.extend_from_slice(&chunk[..n]),
-                    }
-                }
-            });
-        }
-    });
-    FakeAya { log, task }
-}
-
-fn png_bytes(rgba: [u8; 4]) -> Vec<u8> {
-    let img = image::RgbaImage::from_pixel(72, 72, image::Rgba(rgba));
-    let mut png = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut png, image::ImageFormat::Png).unwrap();
-    png.into_inner()
-}
-
-#[tokio::test]
-async fn the_helper_is_installed_started_and_asked_for_icons_once() {
-    use adbdeck::appicon::{fetch_batch, HelperState, Request};
-    let (listener, port) = bind_aya().await;
-    let f = Fake::new(&format!("export FAKE_AYA_PORT={port}"));
-    let aya = serve_aya(
-        listener,
-        f.state().join("aya-started"),
-        vec![
-            ("com.example.app", "Example App", Some("/data/local/tmp/aya/icons/com.example.app.1.png")),
-            ("com.example.game", "Example Game", None),
-        ],
-    );
-    let icons = f.dir.path().join("home/root/tmp/aya/icons");
-    fs::create_dir_all(&icons).unwrap();
-    fs::write(icons.join("com.example.app.1.png"), png_bytes([200, 30, 30, 255])).unwrap();
-
-    let dev = f.adb.device(SERIAL);
-    let cache = f.dir.path().join("cache");
-    let state = tokio::sync::Mutex::new(HelperState::Idle);
-    let asked = [
-        Request { package: "com.example.app".into(), version_code: 42 },
-        Request { package: "com.example.game".into(), version_code: 7 },
-        Request { package: "com.android.settings".into(), version_code: 1 },
-    ];
-    let batch = fetch_batch(&state, &dev, &asked, &cache).await;
-
-    assert!(batch.failure.is_none(), "{:?}", batch.failure);
-    let app = batch.done.iter().find(|d| d.package == "com.example.app").expect("the app was resolved");
-    assert_eq!(app.entry.label, "Example App");
-    assert_eq!(&app.entry.icon.as_ref().expect("it has an icon").rgba[..4], &[200, 30, 30, 255]);
-    let game = batch.done.iter().find(|d| d.package == "com.example.game").expect("the game was resolved");
-    assert_eq!(
-        (game.entry.icon.is_none(), game.entry.label.as_str()),
-        (true, "Example Game"),
-        "an app without an icon is a definite answer"
-    );
-    assert!(batch.done.iter().all(|d| d.package != "com.android.settings"), "an app the helper could not read is left out");
-    assert_eq!(
-        fs::read(f.dir.path().join("home/root/tmp/aya/aya.dex")).unwrap(),
-        adbdeck::aya::HELPER_DEX,
-        "the bundled helper was pushed unchanged"
-    );
-    assert_eq!(aya.calls().iter().filter(|c| *c == "getPackageInfos").count(), 1, "one round trip for the whole batch");
-
-    // Apps that are cached are answered without the device, even with a fresh helper state.
-    let before = aya.calls().len();
-    let again = tokio::sync::Mutex::new(HelperState::Idle);
-    let cached = fetch_batch(&again, &dev, &asked[..2], &cache).await;
-    assert_eq!(cached.done.len(), 2);
-    assert_eq!(aya.calls().len(), before, "the cache answered");
-    assert!(matches!(*again.lock().await, HelperState::Idle), "the helper was not even started");
-
-    let ready = std::mem::take(&mut *state.lock().await);
-    if let HelperState::Ready(h) = ready {
-        h.shutdown().await;
-    }
-}
-
-#[tokio::test]
-async fn a_helper_that_dies_on_start_is_reported_quickly_and_leaves_the_apps_unresolved() {
-    use adbdeck::appicon::{fetch_batch, HelperState, Request};
-    // The port is closed again at once: nothing answers there.
-    let (listener, port) = bind_aya().await;
-    drop(listener);
-    let f = Fake::new(&format!("export FAKE_AYA_PORT={port}\nexport FAKE_AYA_CRASH=1"));
-    let dev = f.adb.device(SERIAL);
-    let state = tokio::sync::Mutex::new(HelperState::Idle);
-    let started = Instant::now();
-    let batch =
-        fetch_batch(&state, &dev, &[Request { package: "com.example.app".into(), version_code: 42 }], &f.dir.path().join("cache")).await;
-
-    assert!(started.elapsed() < Duration::from_secs(8), "an early exit must not wait out the start-up timeout");
-    assert!(batch.done.is_empty());
-    let why = batch.failure.expect("the failure is reported");
-    assert!(why.contains("exited right after starting") && why.contains("class io.liriliri.aya.Server not found"), "{why}");
-    assert!(matches!(*state.lock().await, HelperState::Failed(_)), "the failure is remembered, not retried on every frame");
-    assert!(!f.dir.path().join("cache").join("com.example.app-42.label").exists(), "a transient failure is never cached");
-}
-
 // ---- embedded screen mirroring ----------------------------------------------------------------
 
 /// Polls `f` until it returns a value; panics after `secs` seconds.
@@ -948,7 +778,7 @@ async fn the_mirror_streams_video_and_carries_input_both_ways() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_server_that_dies_on_start_is_reported_with_its_message() {
     use adbdeck::mirror::{Event, Session};
-    let f = Fake::new("export FAKE_AYA_CRASH=1");
+    let f = Fake::new("export FAKE_SERVER_CRASH=1");
     let start = Instant::now();
     let mut session = Session::start(
         f.adb.device(SERIAL),
@@ -959,7 +789,7 @@ async fn a_server_that_dies_on_start_is_reported_with_its_message() {
     );
     let ended = eventually(15, "the session to fail", || session.poll_event()).await;
     let Event::Ended(Some(why)) = ended else { panic!("expected a failure, got {ended:?}") };
-    assert!(why.contains("stopped before it connected") && why.contains("class io.liriliri.aya.Server not found"), "{why}");
+    assert!(why.contains("stopped before it connected") && why.contains("class com.genymobile.scrcpy.Server not found"), "{why}");
     assert!(start.elapsed() < Duration::from_secs(8), "a dead server is noticed long before the connect time-out");
 }
 

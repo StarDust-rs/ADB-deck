@@ -86,11 +86,7 @@ case "$cmd" in
       --list) [ -f "$list" ] && cat "$list"; exit 0;;
       --remove) grep -v "^[^ ]* $2 " "$list" > "$list.tmp" 2>/dev/null; mv "$list.tmp" "$list" 2>/dev/null; exit 0;;
     esac
-    if [ "$1" = "tcp:0" ]; then
-      # The Aya helper's abstract socket is served by the test process on $FAKE_AYA_PORT.
-      if [ "$2" = "localabstract:aya" ] && [ -n "$FAKE_AYA_PORT" ]; then echo "$FAKE_AYA_PORT"; else echo 40123; fi
-      exit 0
-    fi
+    if [ "$1" = "tcp:0" ]; then echo 40123; exit 0; fi
     echo "${serial:-FAKE0001} $1 $2" >> "$list";;
   shell)
     need_device

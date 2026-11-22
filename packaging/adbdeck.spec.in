@@ -33,6 +33,7 @@ BuildRequires:  systemd-rpm-macros
 # The binary links only libc, libm and libgcc_s; winit, glow and the portals load
 # these libraries at run time.
 Requires:       android-tools
+Requires:       curl
 Requires:       hicolor-icon-theme
 Requires:       libxkbcommon
 Requires:       libxkbcommon-x11
@@ -50,7 +51,6 @@ Recommends:     xdg-desktop-portal
 Recommends:     xdg-utils
 
 # Crates are declared by the generator from cargo-vendor.txt (a %%license file below).
-Provides:       bundled(adbplus-aya-helper) = 1.20.0
 Provides:       bundled(font(inter))
 Provides:       bundled(font(jetbrainsmono))
 Provides:       bundled(scrcpy-server) = 3.1
@@ -68,17 +68,16 @@ A windowless background service (adbdeck --daemon) reconnects remembered
 phones at login without the window being open. It is switched on by default
 and can be turned off in Settings; a systemd user unit is also provided.
 
-The application runs as the normal user and never downloads or executes
-anything from the network. Settings are stored per user under
+App icons and names are looked up on the Play Store through an open source
+metadata service (play.rajkumaar.co.in) with curl; only package names are sent,
+and the lookup can be switched off in Settings. The application runs as the
+normal user and never executes anything it downloads. Settings are stored per user under
 ~/.config/adbdeck and ~/.local/share/adbdeck and are not touched by package
 removal.
 
 %prep
 %autosetup -n %{name}-%{version} -a1
 %cargo_prep -v vendor
-# Two files are called NOTICE.md and %%license installs by file name alone.
-cp -p assets/aya/NOTICE.md aya-NOTICE.md
-cp -p assets/scrcpy/NOTICE.md scrcpy-NOTICE.md
 
 %build
 %cargo_build
@@ -113,7 +112,7 @@ appstreamcli validate --no-net --explain %{buildroot}%{_metainfodir}/dev.adbdeck
 %systemd_user_preun adbdeck-daemon.service
 
 %files
-%license LICENSE assets/aya/LICENSE-AGPL-3.0.txt aya-NOTICE.md assets/scrcpy/LICENSE-Apache-2.0.txt scrcpy-NOTICE.md assets/fonts/Inter-LICENSE.txt assets/fonts/JetBrainsMono-OFL.txt
+%license LICENSE assets/scrcpy/LICENSE-Apache-2.0.txt assets/scrcpy/NOTICE.md assets/fonts/Inter-LICENSE.txt assets/fonts/JetBrainsMono-OFL.txt
 %license LICENSE.dependencies cargo-vendor.txt
 %doc README.md docs/ARCHITECTURE.md docs/FEATURE_INVENTORY.md
 %{_bindir}/adbdeck

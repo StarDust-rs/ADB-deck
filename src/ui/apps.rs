@@ -114,11 +114,6 @@ fn unused_path(dir: &std::path::Path, stem: &str, ext: &str) -> PathBuf {
 }
 
 impl Apps {
-    /// Stops the on-device helper; called when the app exits.
-    pub fn close(&mut self, rt: &tokio::runtime::Runtime) {
-        self.icons.close(rt);
-    }
-
     fn reload(&mut self, env: &Env, d: &DeviceCtx) {
         let dev = d.dev.clone();
         self.error = None;
@@ -203,7 +198,7 @@ impl Apps {
             ui.add_space(8.0);
         }
         if let Some(why) = self.icons.failure().map(str::to_owned) {
-            let text = format!("App icons and names are unavailable: {why}");
+            let text = format!("App icons could not be fetched from the Play Store: {why}");
             if kit::banner(ui, kit::Kind::Warning, &text, Some("Retry")) {
                 self.icons.retry_missing();
             }
@@ -231,7 +226,7 @@ impl Apps {
             .show_separator_line(false)
             .show_inside(ui, |ui| self.details(ui, env, d));
         egui::CentralPanel::default().frame(egui::Frame::NONE).show_inside(ui, |ui| self.table(ui, env));
-        self.icons.pump(env, d);
+        self.icons.pump(env);
     }
 
     /// Rebuilds the list of visible rows when the packages or the filter changed.

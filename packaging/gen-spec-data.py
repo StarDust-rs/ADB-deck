@@ -33,4 +33,4 @@ def wrap(l):
     return f"({l})" if (" OR " in l or " AND " in l) else l
 
 
-print(" AND ".join(["GPL-3.0-or-later", "AGPL-3.0-only"] + [wrap(l) for l in sorted(licenses)]))
+print(" AND ".join(["GPL-3.0-or-later"] + [wrap(l) for l in sorted(licenses)]))

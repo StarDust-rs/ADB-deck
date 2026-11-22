@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Desktop companion for Android Debug Bridge (ADB) on Linux"
-license = "GPL-3.0-or-later AND AGPL-3.0-only AND Apache-2.0 AND BSD-2-Clause"
+license = "GPL-3.0-or-later AND Apache-2.0 AND BSD-2-Clause"
 repository = "https://example.invalid/adbdeck"
 publish = false
 

@@ -10,7 +10,7 @@ The first release run (logs reviewed) built the package on Fedora 44 and 45, x86
 `bundled(crate(...))` Provides from `cargo-vendor.txt`. All four then failed at the end of the build, in the check for unpackaged files:
 `%cargo_install` also installs the crate sources into `/usr/share/cargo/registry/` when the crate has a library target as well as a binary.
 Fixed by installing `target/rpm/adbdeck` directly. The same run warned that two license files are both called `NOTICE.md` (installed by file name,
-so one would have replaced the other); they are now installed as `aya-NOTICE.md` and `scrcpy-NOTICE.md`.
+so one would have replaced the other); that came from the on-device helper's notice, which was later removed with the helper.
 
 After that fix the package itself has **not** been built again: the rest of the report (everything after `%install`) is unverified.
 

@@ -1163,9 +1163,6 @@ impl eframe::App for App {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // Dropping panels cancels their jobs and kills child processes.
-        if let Some(dp) = self.dp.as_mut() {
-            dp.apps.close(&self.rt);
-        }
         self.dp = None;
         self.global.mirror.shutdown(&self.rt);
         self.save_if_dirty();

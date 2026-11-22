@@ -115,28 +115,7 @@ Defects found by reading the code and by driving the GUI, each fixed, with the e
 | Apps/Processes/Connections toolbars and cards overflowed the window at the 820 px minimum | icon-only navigation rail below 1100 px, narrower search fields, stacked Connections cards | screenshots at 820x520 |
 | Settings/About rows misaligned (`allocate_ui_with_layout` shrinks to content) | `kit::fixed_cell` | screenshots |
 
-App icons and names (third pass): the first implementation parsed APKs on the host; it was replaced
-by a port of ADBPlus' approach (on-device helper `aya.dex`, see `docs/ARCHITECTURE.md`).
-
-* Unit tests (`aya`, `appicon`): Protobuf encoding against hand-computed bytes, round trip incl.
-  two-byte lengths, partial messages at every cut point, unknown fields, malformed/oversized
-  input, defensive JSON parsing, the icon-path allow-list (traversal, spaces, other directories),
-  decode of PNGs of several sizes, corrupt images, cache round trip and half-written entries.
-* Integration tests against the fake device, with a stand-in helper that speaks the real wire
-  protocol: the bundled dex is pushed unchanged and started through `app_process`, one
-  `getPackageInfos` call serves a whole batch, icons are read through `adb exec-out`, an app with
-  no icon and an app the helper cannot read are handled, a second lookup is answered from the cache
-  without starting the helper, and a helper that dies on start is reported in well under the
-  10 s timeout and is not retried or cached.
-* GUI (screenshots, fake adb plus a scratch Python stand-in for the helper): icons in rows and
-  details header, label as the details title, and the fallback note and letter badges when the
-  helper does not answer.
-
-**Not verified:** the real `aya.dex` has never been executed by this project. No Android device,
-emulator, `app_process`, SELinux policy or real `adb forward localabstract:` was available, so
-whether it starts and answers on real phones (and on which Android versions) is untested. The
-Kotlin source in `assets/aya/source` was not rebuilt, so that it matches the bundled dex is taken
-from ADBPlus.
+App icons and names (third pass): an on-device helper supplied them; it was removed in the Play Store icon pass (see below).
 
 UI revamp (anti-slop pass): removed icon-before-heading, icon tiles on cards, the accent bar on the
 navigation, per-card pill badges and unused helpers; headings and card titles are plain text.
@@ -146,21 +125,20 @@ Remote control and Settings at 820x520 were not re-captured after the navigation
 
 Fourth pass (robustness and efficiency; the user confirmed icons appear on a real phone):
 
-* Helper start-up: a stale or hung helper is killed before a new one is launched (pattern
-  `io.liriliri.aya.Serve[r]`, which does not match its own `pkill`), the start-up wait is 15 s, and
-  a failed start appends the last `aya`/`AndroidRuntime` lines of the device log to the message.
-  These device-side behaviours are UNVERIFIED against a real device (only the fake adb ran them).
-* A failed helper is now a visible warning banner in the Apps panel with Retry, not a tooltip.
-  Checked by screenshot: the banner appears after the 15 s wait; icons, names and the compact rail
-  were re-captured at 820x520 against the stand-in helper.
 * Apps list rows are rebuilt only when the packages, filter, sort or system toggle change (it was
   every frame). Filters in Apps, Processes, Files and Logcat use `text::contains_ci`, which does
   not allocate for ASCII text (it did 2 allocations per entry per frame in Logcat); 2 unit tests.
 * Settings and About are pinned to the bottom of the navigation rail; only the panel list scrolls.
 
-Known limitations: the icon cache is never pruned; a helper left running after ADB Deck is
-killed stays on the phone until it restarts.
+Known limitation: the icon cache is never pruned.
 
+
+## Play Store icon pass (not verified)
+
+Removed: the on-device helper with its client, assets, licence text and notice, `forward_dynamic`, the stand-in helper and its two
+integration tests, and the second licence from the licence expressions. Added: `appicon` as a Play Store metadata
+client (via `curl`), the `fetch_app_icons` setting, 13 unit tests, 8 integration tests against a stand-in `curl` (`tests/play_icons.rs`).
+The stand-in `curl` was exercised directly in the sandbox; **nothing was compiled or run**, and the live service was not called.
 
 ## Fifth pass: embedded mirror, app actions, device controls, connection resilience
 
