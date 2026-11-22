@@ -19,6 +19,13 @@ earlier passes compiled and its new tests pass), the desktop file and AppStream 
 check (`%cargo_install` installed crate sources); see `docs/PACKAGING_REPORT.md`. Nothing after that point has run: the `dnf install` check,
 `rpmlint`, the publish job.
 
+## Second CI run (2026-11-21, from the workflow logs)
+
+Same result on all four variants: build, 191 + 19 + 2 + 39 tests, validation and packaging passed; the run failed in the smoke test because
+`dnf install` in the container skips the man page (`tsflags=nodocs`). Fixed in the workflow, which now builds Fedora 45 x86_64 only.
+Checked in a sandbox afterwards: `actionlint` and `shellcheck` clean, the package selection, install-check and release-text steps run against
+simulated inputs (including the real file list from the log). Not run: the workflow on GitHub, `dnf`, `rpmbuild`.
+
 ## Fedora 44/45 packaging pass (not verified)
 
 The spec, `build-rpm.sh`, the AppStream file, the man page, the systemd unit and the workflow were rewritten for
@@ -32,8 +39,8 @@ Run in the sandbox and passing: `packaging/set-version.py` (stamps Cargo.toml an
 nothing else, rejects bad input), `packaging/release-notes.sh` against a throwaway repository (grouping,
 merge commits skipped, first release, a tag with no new commits, previous-tag detection), and a YAML parse
 of `.github/workflows/release.yml`. **Not run**: the workflow itself on GitHub, the Fedora container
-build, `dnf install` of the RPM, the aarch64 runner, publishing to a release. The workflow has not been
-linted with actionlint.
+build, `dnf install` of the RPM, the aarch64 runner, publishing to a release. The workflow was linted with actionlint
+afterwards (clean).
 
 ## UI polish pass (not verified)
 

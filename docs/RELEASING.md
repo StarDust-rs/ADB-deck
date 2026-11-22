@@ -12,15 +12,17 @@ A release is made from `main` in the GitHub web interface. The workflow in
 4. Leave the notes empty (or write an introduction; see below) and press **Publish release**.
 
 Publishing starts the workflow. When it finishes, the release has the RPMs, `SHA256SUMS`
-and the notes. A failed run leaves the release without files; fix the cause and use
-**Actions → Release → Run workflow** with the same tag.
+and the notes. A failed run leaves the release without files. **Run workflow** with the same tag rebuilds that tag's commit
+with the *workflow file* of the branch you run it from, so it only helps when the fix was in
+`.github/workflows/release.yml`. If the fix touched anything else (`packaging/`, the spec, the code), the tag still
+points at the old files: release a new patch version (for example `v1.0.1`) instead.
 
 ## What the workflow does
 
 | Job | What it does |
 |---|---|
 | `prepare` | Refuses a tag that is not `vX.Y.Z` or whose commit is not on `main`. Writes the release notes. Takes the commit time for reproducible builds. |
-| `build` | In the Fedora 45 container (x86_64): stamps the version from the tag into `Cargo.toml`, `Cargo.lock` and the AppStream release entry (the build tree only, nothing is committed), runs `packaging/build-rpm.sh` (vendors the crates, builds offline, runs the test suite and the desktop file and AppStream validation in the spec's `%check`), installs the RPM with `dnf`, checks `adbdeck --version` prints the tag's version and the shipped files, and runs `rpmlint` for information. |
+| `build` | In the Fedora 45 container (x86_64): stamps the version from the tag into `Cargo.toml`, `Cargo.lock` and the AppStream release entry (the build tree only, nothing is committed), runs `packaging/build-rpm.sh` (vendors the crates, builds offline, runs the test suite and the desktop file and AppStream validation in the spec's `%check`), installs the RPM with `dnf`, checks `adbdeck --version` prints the tag's version and the shipped files (the file list comes from the installed package, because the Fedora container installs with `tsflags=nodocs` and leaves the man page off the disk), and runs `rpmlint` for information. |
 | `publish` | Attaches the RPM, the source RPM and `SHA256SUMS` to the release, adds a build provenance attestation (public repositories) and writes the notes. Nothing is published unless the build succeeded. |
 
 The version number is typed once, in the tag. The `version` in `Cargo.toml` on `main`
@@ -44,8 +46,8 @@ notes. The generated part is replaced when the workflow runs again.
 
 ## Changing the target
 
-The workflow builds one variant: Fedora 45, x86_64. To change it, edit the container image (`fedora:45`),
-the `.fc45` dist tag in the *Build the RPMs* step and the `fc45.x86_64` names in the later steps.
+The workflow builds one variant: Fedora 45, x86_64. To change it, edit the container image (`fedora:45`) and `FEDORA_RELEASE` / `RPM_ARCH` at the top of the workflow;
+the first build step fails if the image and `FEDORA_RELEASE` disagree. Every file name is derived from them.
 Fedora 43 ends on 2026-12-09. The debuginfo and debugsource RPMs are built but not published.
 Another branch than `main`: `MAIN_BRANCH` at the top of the workflow.
 
@@ -54,6 +56,5 @@ Another branch than `main`: `MAIN_BRANCH` at the top of the workflow.
 * The RPMs are not signed (see `docs/PACKAGING_REPORT.md`); verify a download with `SHA256SUMS` or
   `gh attestation verify FILE --repo OWNER/REPO`.
 * Only stable tags, `vMAJOR.MINOR.PATCH`. RPM versions cannot contain `-`, so `v1.0.0-rc1` is refused.
-* The RPM dependency names were written without a Fedora repository to check them. The
-  install step in `build` is the first real check; if it fails, the log names the package.
+* The install step in `build` is the real check of the RPM's dependency names; if it fails, the log names the package.
 * Pushing a tag from the command line, without creating a release, does not start the workflow.

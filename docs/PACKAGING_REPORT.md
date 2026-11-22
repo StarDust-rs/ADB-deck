@@ -12,7 +12,11 @@ The first release run (logs reviewed) built the package on Fedora 44 and 45, x86
 Fixed by installing `target/rpm/adbdeck` directly. The same run warned that two license files are both called `NOTICE.md` (installed by file name,
 so one would have replaced the other); that came from the on-device helper's notice, which was later removed with the helper.
 
-After that fix the package itself has **not** been built again: the rest of the report (everything after `%install`) is unverified.
+The second run (2026-11-21, logs reviewed) built, tested and packaged all four again. All four failed in the workflow's smoke test, not in the
+package: `ls /usr/share/man/man1/adbdeck.1*` found nothing after `dnf install`, although `rpm -qlp` listed `adbdeck.1.gz`. rpm flags files under
+`/usr/share/man` as documentation and the Fedora container image installs with `tsflags=nodocs`, so dnf leaves them out. The check now reads the
+installed package's file list. Steps after it (`desktop-file-validate`, `appstreamcli`, `rpm -V`, `rpmlint`, the publish job) had not run yet.
+The `cpio: ... asm_inc.asm: Cannot stat` lines in the debugsource step of the x86_64 builds are harmless and were left alone.
 
 ## What the package follows
 
@@ -40,7 +44,7 @@ After that fix the package itself has **not** been built again: the rest of the 
 * **Fedora main repositories.** The package could not be submitted there as it stands: it bundles a scrcpy server binary and builds the
   openh264 source (H.264 is not allowed in Fedora's repositories without Cisco's binary), and its crates are vendored. It is meant for
   GitHub releases or a COPR.
-* **Other variants.** The workflow builds Fedora 45 x86_64 only. The same spec built and tested on Fedora 44 and on aarch64 in the first run.
+* **Other variants.** The workflow builds Fedora 45 x86_64 only. The same spec built and tested on Fedora 44 and on aarch64 in the first two runs.
 
 ## What was checked in the sandbox
 

@@ -63,6 +63,8 @@ for key, value in (("@LICENSE@", os.environ["LICENSE_EXPR"]), ("@VERSION@", os.e
 print(t, end="")
 PY
 
+# RPMBUILD_ARGS is deliberately word-split (it may hold several options).
+# shellcheck disable=SC2086
 rpmbuild -ba ${RPMBUILD_ARGS:-} \
   --define "_topdir $top" --define "dist $dist" \
   --define "_buildhost reproducible" \

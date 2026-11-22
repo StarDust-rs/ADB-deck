@@ -1,9 +1,9 @@
 name: Release
 
 # Publish a GitHub release for a new tag (for example v1.0.0) and this workflow
-# builds the RPMs from that commit, attaches them to the release and writes the
-# release notes from the commit titles since the previous release.
-# See docs/RELEASING.md.
+# builds the Fedora 45 x86_64 RPM from that commit, attaches it (with the source
+# RPM and the checksums) to the release and writes the release notes from the
+# commit titles since the previous release. See docs/RELEASING.md.
 
 on:
   release:
@@ -22,28 +22,37 @@ concurrency:
   group: release-${{ github.event.release.tag_name || inputs.tag }}
   cancel-in-progress: false
 
+defaults:
+  run:
+    shell: bash
+
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
   # Releases are cut from this branch only.
   MAIN_BRANCH: main
+  # The one release target. The build job's container image must be this Fedora
+  # release (the job checks it); the architecture is the runner's.
+  FEDORA_RELEASE: "45"
+  RPM_ARCH: x86_64
 
 jobs:
   # Checks that the tag may be released and writes the release notes.
   prepare:
     name: Check tag and write release notes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.check.outputs.version }}
       epoch: ${{ steps.check.outputs.epoch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Check the tag
         id: check
-        shell: bash
         run: |
           if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             echo "::error::The tag '$TAG' is not a version tag. Use vMAJOR.MINOR.PATCH, for example v1.0.0."
@@ -52,6 +61,10 @@ jobs:
           echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
           # The commit time stamps the tarballs, the changelog entry and the build time.
           echo "epoch=$(git log -1 --format=%ct)" >> "$GITHUB_OUTPUT"
+          if ! git rev-parse --verify --quiet "origin/$MAIN_BRANCH^{commit}" > /dev/null; then
+            echo "::error::The branch '$MAIN_BRANCH' does not exist in this repository."
+            exit 1
+          fi
           if ! git merge-base --is-ancestor HEAD "origin/$MAIN_BRANCH"; then
             echo "::error::The tag '$TAG' is not on '$MAIN_BRANCH'. Create the release from '$MAIN_BRANCH'."
             exit 1
@@ -60,97 +73,134 @@ jobs:
       - name: Write the release notes
         run: packaging/release-notes.sh "$TAG" > release-notes.md
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-notes
           path: release-notes.md
+          if-no-files-found: error
+          retention-days: 14
 
   # Builds, tests (the spec's %check runs the test suite and validates the desktop
-  # file and the AppStream metadata) and smoke-installs the RPMs inside each
-  # supported Fedora release, once per architecture.
+  # file and the AppStream metadata) and smoke-installs the RPM inside the target
+  # Fedora release.
   build:
-    name: RPM (Fedora ${{ matrix.fedora }}, ${{ matrix.arch }})
+    name: RPM (Fedora 45, x86_64)
     needs: prepare
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     container:
-      image: registry.fedoraproject.org/fedora:${{ matrix.fedora }}
+      # Keep in step with FEDORA_RELEASE above (the first step checks it).
+      image: registry.fedoraproject.org/fedora:45
     env:
+      VERSION: ${{ needs.prepare.outputs.version }}
       SOURCE_DATE_EPOCH: ${{ needs.prepare.outputs.epoch }}
       ADBDECK_URL: ${{ github.server_url }}/${{ github.repository }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Fedora supports two releases at a time; add the next one when it ships.
-        include:
-          - { fedora: "45", arch: x86_64, runner: ubuntu-latest, srpm: true }
-          # Remove the aarch64 entries to release for x86_64 only.
-          - { fedora: "45", arch: aarch64, runner: ubuntu-24.04-arm, srpm: false }
-          - { fedora: "44", arch: x86_64, runner: ubuntu-latest, srpm: false }
-          - { fedora: "44", arch: aarch64, runner: ubuntu-24.04-arm, srpm: false }
     steps:
+      - name: Check the build target
+        run: |
+          . /etc/os-release
+          if [ "$ID" != fedora ] || [ "$VERSION_ID" != "$FEDORA_RELEASE" ]; then
+            echo "::error::The container is $ID $VERSION_ID, the release target is Fedora $FEDORA_RELEASE. Change the image or FEDORA_RELEASE."
+            exit 1
+          fi
+          if [ "$(uname -m)" != "$RPM_ARCH" ]; then
+            echo "::error::The runner is $(uname -m), the release target is $RPM_ARCH."
+            exit 1
+          fi
+
       - name: Install build tools
         run: |
           dnf -y install git rpm-build redhat-rpm-config cargo-rpm-macros cargo rust \
-            gcc gcc-c++ desktop-file-utils appstream systemd-rpm-macros rpmlint \
+            gcc gcc-c++ nasm desktop-file-utils appstream systemd-rpm-macros rpmlint \
             python3 tar gzip xz gawk sed findutils procps-ng which
-          # nasm assembles x86 code only, and the spec asks for it on x86_64 only.
-          if [ "$(uname -m)" = x86_64 ]; then dnf -y install nasm; fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
 
       - name: Stamp the version from the tag
-        run: python3 packaging/set-version.py "${{ needs.prepare.outputs.version }}"
+        run: python3 packaging/set-version.py "$VERSION"
 
       - name: Build the RPMs
-        run: sh packaging/build-rpm.sh ".fc${{ matrix.fedora }}"
+        run: sh packaging/build-rpm.sh ".fc${FEDORA_RELEASE}"
 
       - name: Select the packages to publish
         run: |
-          mkdir -p out
-          # The debuginfo and debugsource packages stay in the build tree.
-          find dist/rpmbuild/RPMS -name 'adbdeck-[0-9]*.rpm' ! -name '*debuginfo*' ! -name '*debugsource*' -exec cp {} out/ \;
-          if [ "${{ matrix.srpm }}" = "true" ]; then
-            cp dist/rpmbuild/SRPMS/*.src.rpm out/
+          shopt -s nullglob
+          # The names are matched on version and architecture, so the debuginfo and
+          # debugsource packages (adbdeck-debuginfo-...) stay in the build tree.
+          rpms=(dist/rpmbuild/RPMS/"$RPM_ARCH"/adbdeck-"$VERSION"-*."fc${FEDORA_RELEASE}.${RPM_ARCH}".rpm)
+          srpms=(dist/rpmbuild/SRPMS/adbdeck-"$VERSION"-*."fc${FEDORA_RELEASE}".src.rpm)
+          if [ "${#rpms[@]}" -ne 1 ] || [ "${#srpms[@]}" -ne 1 ]; then
+            echo "::error::Expected one binary and one source RPM for $VERSION, found ${#rpms[@]} and ${#srpms[@]}."
+            find dist/rpmbuild/RPMS dist/rpmbuild/SRPMS -name '*.rpm'
+            exit 1
           fi
+          mkdir -p out
+          cp -- "${rpms[0]}" "${srpms[0]}" out/
           ls -l out
-          test "$(ls out/adbdeck-*.fc${{ matrix.fedora }}.${{ matrix.arch }}.rpm | wc -l)" = 1
+          echo "RPM=out/${rpms[0]##*/}" >> "$GITHUB_ENV"
 
       - name: Install it and check what it ships
         run: |
-          rpm=$(ls out/adbdeck-*.fc${{ matrix.fedora }}.${{ matrix.arch }}.rpm)
-          rpm -qip "$rpm"
-          rpm -qlp "$rpm"
-          rpm -qp --provides "$rpm"
-          rpm -qp --requires "$rpm"
-          dnf -y install "$rpm"
-          test "$(adbdeck --version)" = "adbdeck ${{ needs.prepare.outputs.version }}"
+          rpm -qip "$RPM"
+          rpm -qlp "$RPM"
+          rpm -qp --provides "$RPM"
+          rpm -qp --requires "$RPM"
+          dnf -y install "$RPM"
+
+          test "$(adbdeck --version)" = "adbdeck $VERSION"
           adbdeck --help
+
+          # Container images install with tsflags=nodocs, which leaves out every file
+          # rpm flags as documentation, the man page included. So what the package
+          # ships is read from the installed package's file list, not from the disk.
+          grep -rHs '^tsflags' /etc/dnf /usr/share/dnf5 || echo "tsflags is not set"
+          shipped=$(rpm -ql adbdeck)
+          for pattern in \
+            '^/usr/bin/adbdeck$' \
+            '^/usr/share/man/man1/adbdeck\.1(\.[a-z0-9]+)?$' \
+            '^/usr/lib/systemd/user/adbdeck-daemon\.service$' \
+            '^/usr/share/applications/adbdeck\.desktop$' \
+            '^/usr/share/metainfo/dev\.adbdeck\.AdbDeck\.metainfo\.xml$' \
+            '^/usr/share/icons/hicolor/scalable/apps/adbdeck\.svg$' \
+            '^/usr/share/icons/hicolor/256x256/apps/adbdeck\.png$'; do
+            if ! grep -Eq "$pattern" <<< "$shipped"; then
+              echo "::error::The package ships no file matching $pattern"
+              exit 1
+            fi
+          done
+
+          # Files that are not documentation are on the disk, and must be as packaged.
           test -f /usr/lib/systemd/user/adbdeck-daemon.service
-          ls /usr/share/man/man1/adbdeck.1*
           desktop-file-validate /usr/share/applications/adbdeck.desktop
           appstreamcli validate --no-net --explain /usr/share/metainfo/dev.adbdeck.AdbDeck.metainfo.xml
           rpm -V adbdeck
 
       - name: Lint the packages (for information)
-        continue-on-error: true
         run: |
-          rpmlint out/*.rpm 2>&1 | tee rpmlint.txt
-          { echo '### rpmlint, Fedora ${{ matrix.fedora }} ${{ matrix.arch }}'; echo '```'; tail -n 40 rpmlint.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          rpmlint out/*.rpm 2>&1 | tee rpmlint.txt || true
+          {
+            echo "### rpmlint, Fedora ${FEDORA_RELEASE} ${RPM_ARCH}"
+            echo '```'
+            tail -n 40 rpmlint.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
-          name: rpm-fc${{ matrix.fedora }}-${{ matrix.arch }}
+          name: rpm
           path: out/*.rpm
           if-no-files-found: error
+          retention-days: 14
 
   # Attaches the RPMs to the release and fills in its notes.
   publish:
     name: Publish to the release
     needs: [prepare, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
       id-token: write
@@ -159,52 +209,51 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
-          pattern: rpm-*
+          name: rpm
           path: files
-          merge-multiple: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-notes
 
       # A signed statement of where and how the files were built; `gh attestation
       # verify FILE --repo OWNER/REPO` checks it. Needs a public repository (or GitHub Enterprise).
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         if: ${{ !github.event.repository.private }}
         with:
           subject-path: files/*.rpm
 
       - name: Write the release text
-        shell: bash
         run: |
           marker='<!-- adbdeck-release-notes -->'
-          cd files
-          sha256sum -- *.rpm > SHA256SUMS
-          cd ..
+          fence='```'
+          (cd files && sha256sum -- *.rpm > SHA256SUMS)
 
           # Text the author typed into the release stays; the generated part is
           # rewritten, so running this again does not pile up notes.
-          existing=$(gh release view "$TAG" --json body --jq .body 2>/dev/null || true)
-          intro=${existing%%"$marker"*}
+          existing=$(gh release view "$TAG" --json body --jq .body 2> /dev/null || true)
+          intro=$(printf '%s' "${existing%%"$marker"*}")
 
           {
             if [[ "$intro" =~ [^[:space:]] ]]; then
               printf '%s\n\n' "$intro"
             fi
-            echo "$marker"
+            printf '%s\n' "$marker"
             cat release-notes.md
-            echo
-            echo '### Install'
-            echo
-            echo 'On Fedora 44 or 45, download the RPM for your release and architecture and run:'
-            echo
-            echo '```'
-            echo 'sudo dnf install ./adbdeck-*.fc$(rpm -E %fedora).$(uname -m).rpm'
-            echo '```'
-            echo
-            echo '`SHA256SUMS` lists the checksums of the files. `*.src.rpm` is the source package; it contains the vendored crates and builds offline.'
+            cat << EOF
+
+          ### Install
+
+          On Fedora ${FEDORA_RELEASE} (${RPM_ARCH}), download the RPM and run:
+
+          ${fence}
+          sudo dnf install ./adbdeck-*.fc${FEDORA_RELEASE}.${RPM_ARCH}.rpm
+          ${fence}
+
+          \`SHA256SUMS\` lists the checksums of the files. \`*.src.rpm\` is the source package; it contains the vendored crates and builds offline.
+          EOF
           } > release-body.md
 
       - name: Publish the files and the notes
