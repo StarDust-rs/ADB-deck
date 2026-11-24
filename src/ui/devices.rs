@@ -9,6 +9,7 @@ use adbdeck::error::Error;
 use adbdeck::jobs::Slot;
 use adbdeck::store::{RemoteDevice, ENDPOINTS_MAX};
 
+use super::qr_connect::QrConnect;
 use super::widgets;
 use super::{kit, theme, Env};
 
@@ -21,6 +22,9 @@ pub struct Connections {
     pair_host: String,
     pair_port: String,
     pair_code: String,
+    qr: QrConnect,
+    /// Set by the "no device" screen and the device menu: show a QR code as soon as this panel is drawn.
+    qr_requested: bool,
     op: Slot<String>,
     ports: Slot<Ports>,
     port_data: Option<Ports>,
@@ -39,6 +43,11 @@ impl Connections {
         self.ports_for = Some(device.id.clone());
         self.port_error = None;
         self.ports.set(env.sp.spawn(async move { Ok((dev.list_forwards().await?, dev.list_reverses().await?)) }));
+    }
+
+    /// Asks for a QR code to be shown the next time the panel is drawn.
+    pub fn request_qr(&mut self) {
+        self.qr_requested = true;
     }
 
     pub fn ui(&mut self, ui: &mut Ui, env: &mut Env, device: Option<&Device>) {
@@ -73,6 +82,13 @@ impl Connections {
 
         let p = theme::pal(ui);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            let wants_qr = std::mem::take(&mut self.qr_requested);
+            self.qr.ui(ui, env, &adb);
+            if wants_qr && !self.qr.running() {
+                self.qr.start(env, &adb);
+                ui.ctx().request_repaint();
+            }
+            ui.add_space(12.0);
             let busy = self.op.busy();
             // Side by side when there is room, stacked otherwise.
             let mut top_card = |ui: &mut Ui, which: usize| match which {

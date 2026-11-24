@@ -182,6 +182,13 @@ pub fn suppress(suppressed: &Suppressed, id: &str, on: bool) {
     }
 }
 
+/// Lets the watcher connect a phone again whatever port it used when the user disconnected it.
+pub fn unsuppress_host(suppressed: &Suppressed, host: &str) {
+    if let Ok(mut set) = suppressed.lock() {
+        set.retain(|id| id.rsplit_once(':').is_none_or(|(h, _)| h != host));
+    }
+}
+
 /// What [`watch_devices`] reports.
 #[derive(Debug)]
 pub enum WatchEvent {
@@ -614,6 +621,18 @@ mod tests {
         0123456789ABCDEF    no permissions (user in plugdev group; are your udev rules wrong?); see [http://developer.android.com/tools/device.html]\n\
         R58M1234            connecting\n\
         weird               sideload\n";
+
+    #[test]
+    fn a_whole_host_can_be_released_whatever_its_port() {
+        let suppressed = Suppressed::default();
+        for id in ["192.168.1.20:5555", "192.168.1.20:40111", "192.168.1.200:5555", "R58M1234"] {
+            suppress(&suppressed, id, true);
+        }
+        unsuppress_host(&suppressed, "192.168.1.20");
+        let mut left: Vec<_> = suppressed.lock().unwrap().iter().cloned().collect();
+        left.sort();
+        assert_eq!(left, ["192.168.1.200:5555", "R58M1234"], "other hosts, and ids that are not addresses, stay");
+    }
 
     #[test]
     fn parses_all_states_and_skips_daemon_noise() {

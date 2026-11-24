@@ -19,6 +19,7 @@ use crate::process::run;
 
 const MDNS_TIMEOUT: Duration = Duration::from_secs(8);
 const CONNECT_SERVICE: &str = "_adb-tls-connect._tcp";
+const PAIRING_SERVICE: &str = "_adb-tls-pairing._tcp";
 
 /// A phone offering a connection right now.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,26 +40,42 @@ impl Discovered {
 /// Reads `adb mdns services`: tab- or space-separated `instance type ip:port`
 /// rows after a header. Rows for other services, IPv6 addresses and anything
 /// that does not parse are skipped.
-pub fn parse_mdns_services(text: &str) -> Vec<Discovered> {
+fn parse_services(text: &str, service: &str) -> Vec<Discovered> {
     text.lines()
         .filter_map(|line| {
             let mut parts = line.split_whitespace();
             let (instance, kind, endpoint) = (parts.next()?, parts.next()?, parts.next()?);
-            (kind.trim_end_matches('.') == CONNECT_SERVICE && is_remote_id(endpoint))
+            (kind.trim_end_matches('.') == service && is_remote_id(endpoint))
                 .then(|| Discovered { instance: instance.to_string(), endpoint: endpoint.to_string() })
         })
         .collect()
 }
 
+/// The phones offering a connection (`_adb-tls-connect`).
+pub fn parse_mdns_services(text: &str) -> Vec<Discovered> {
+    parse_services(text, CONNECT_SERVICE)
+}
+
+/// The phones waiting to be paired (`_adb-tls-pairing`). After a QR code was scanned the
+/// instance name is the one the code carried.
+pub fn parse_pairing_services(text: &str) -> Vec<Discovered> {
+    parse_services(text, PAIRING_SERVICE)
+}
+
 impl Adb {
-    /// Phones that currently advertise a Wireless debugging connection.
-    pub async fn discover(&self) -> Result<Vec<Discovered>> {
+    /// What adb's mDNS listener currently sees, as printed by `adb mdns services`.
+    pub(super) async fn mdns_services(&self) -> Result<String> {
         // Right after boot adb's mDNS backend can take long to answer; the scan must not wait for it.
         let out = run(&self.spec().args(["mdns", "services"]).timeout(MDNS_TIMEOUT)).await?;
         if !out.success() {
             return Err(Error::Exit { program: "adb".into(), code: out.code, message: out.failure_message() });
         }
-        Ok(parse_mdns_services(&out.stdout_text()))
+        Ok(out.stdout_text())
+    }
+
+    /// Phones that currently advertise a Wireless debugging connection.
+    pub async fn discover(&self) -> Result<Vec<Discovered>> {
+        Ok(parse_mdns_services(&self.mdns_services().await?))
     }
 }
 
@@ -125,6 +142,14 @@ mod tests {
         );
         assert!(parse_mdns_services("").is_empty());
         assert!(parse_mdns_services("ERROR: mdns discovery unavailable\n").is_empty());
+    }
+
+    #[test]
+    fn only_ipv4_pairing_services_are_read() {
+        assert_eq!(parse_pairing_services(OUT), vec![found("adb-R58M1234-AbCdEf", "192.168.1.20:41999")]);
+        let qr = "adbdeck-k3x9q2ab\t_adb-tls-pairing._tcp.\t192.168.1.20:44111\n";
+        assert_eq!(parse_pairing_services(qr), vec![found("adbdeck-k3x9q2ab", "192.168.1.20:44111")]);
+        assert!(parse_pairing_services("").is_empty());
     }
 
     #[test]

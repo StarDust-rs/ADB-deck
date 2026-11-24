@@ -17,6 +17,7 @@ pub mod perf;
 pub mod ports;
 pub mod procs;
 pub mod props;
+pub mod qr;
 pub mod remote_keys;
 pub mod tcpdump;
 

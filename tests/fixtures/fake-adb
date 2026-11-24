@@ -78,7 +78,7 @@ case "$cmd" in
     # `mdns services` lists the rows in $home/mdns (tab separated), if the file exists.
     echo "List of discovered mdns services"
     [ -f "$home/mdns" ] && cat "$home/mdns";;
-  pair) read -r code; echo "Successfully paired to $1 [guid=adb-fake]";;
+  pair) read -r code; printf '%s\n' "$code" > "$FAKE_STATE/paircode"; echo "Successfully paired to $1 [guid=adb-fake]";;
   forward)
     need_device 2>/dev/null
     list="$FAKE_STATE/forwards"

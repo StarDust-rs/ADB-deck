@@ -16,6 +16,7 @@ src/
                   manage.rs = per-app privileged operations, control.rs = device-wide controls,
                   devices.rs = device watcher with the Reconnector state machine,
                   discover.rs = mDNS discovery of paired phones (`adb mdns services`) and the Discoverer planner
+  adb/qr.rs       QR code connection: QrSession (random name + password, `WIFI:T:ADB` payload), scan → pair → connect flow
   adb/known.rs    saved-address probing of remembered phones (endpoints, tcpip port, gateways) and its Prober planner
   daemon.rs       windowless background service (`adbdeck --daemon`): watcher + saved data, single instance per user
   autostart.rs    XDG autostart entry that starts the service at login
@@ -69,6 +70,17 @@ tests/            integration tests + fixtures/fake-adb (simulated device)
   to avoid rewriting the file) and `auto_connect`. New fields have serde defaults, so files written by
   older versions load unchanged. Phones are matched by serial number, so a new port or address updates
   the entry instead of adding one.
+* **QR code connection** (`adb::qr`, `ui::qr_connect`): the window shows `WIFI:T:ADB;S:<name>;P:<password>;;` with a
+  random name (`adbdeck-` + 8 characters) and password (12 characters) read from `/dev/urandom` (no weaker fallback).
+  After the phone scans it, the phone advertises `_adb-tls-pairing._tcp` under that instance name; the flow polls
+  `adb mdns services` for exactly that name, runs `adb pair` (password on stdin, three attempts), then waits for the
+  phone's `_adb-tls-connect._tcp` service (matched by the guid adb prints or by the paired address) and connects. A
+  phone adb already holds is not connected twice (the `Discoverer` planner decides). The code lives 180 s; the
+  phone is paired for good even if the connection step times out. Stages travel to the UI through a `watch` channel;
+  cancelling drops the job, which kills any running `adb`. On success the phone's host is released from the
+  disconnected-on-purpose list and its `auto_connect` is switched back on: scanning a code is asking for the connection.
+  Entry points: the "no device" screen, the device menu and the top card of Connections. The code is drawn from the
+  `qrcode` crate's module matrix (dark on white in every theme, four-module quiet zone, level M).
 * **Finding a phone without mDNS** (`adb::known`): a phone in `adb tcpip` mode, behind a network that
   drops multicast, or tethered over USB is looked for at its saved endpoints, `host:5555`, and
   `gateway:port` for every gateway in `/proc/net/route`. Candidates get a parallel TCP connect (800 ms)

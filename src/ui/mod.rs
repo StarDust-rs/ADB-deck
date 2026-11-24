@@ -17,6 +17,7 @@ mod mirror;
 mod overview;
 mod perf;
 mod processes;
+mod qr_connect;
 mod remote;
 mod screenshot;
 mod settings;
@@ -132,7 +133,7 @@ impl PanelId {
             PanelId::Webview => "Debug WebViews and Chrome tabs running on the device",
             PanelId::Remote => "Send key presses and navigation to the device",
             PanelId::Mirror => "Show and control the device screen",
-            PanelId::Devices => "Connect over Wi-Fi, pair, and manage port mappings",
+            PanelId::Devices => "Connect over Wi-Fi or with a QR code, pair, and manage port mappings",
             PanelId::VirtualDevices => "Start and stop Android emulators",
             PanelId::Signing => "Sign and verify APK files with apksigner",
             PanelId::Settings => "Appearance, tool locations and behaviour",
@@ -746,6 +747,7 @@ impl App {
         let mut choose: Option<String> = None;
         let mut action: Option<PanelId> = None;
         let mut refresh = false;
+        let mut show_qr = false;
         let width = if compact { 250.0 } else { resp.rect.width() };
         egui::popup_below_widget(ui, popup_id, &resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
             ui.set_min_width(width - 16.0);
@@ -775,6 +777,10 @@ impl App {
             if kit::Btn::new("Connect over Wi-Fi…").icon(kit::ph::WIFI_HIGH).subtle().show(ui).clicked() {
                 action = Some(PanelId::Devices);
             }
+            if kit::Btn::new("Connect with QR code…").icon(kit::ph::QR_CODE).subtle().show(ui).clicked() {
+                action = Some(PanelId::Devices);
+                show_qr = true;
+            }
         });
         if self.refresh.busy() {
             ui.ctx().request_repaint();
@@ -784,6 +790,9 @@ impl App {
         }
         if let Some(a) = action {
             self.panel = a;
+        }
+        if show_qr {
+            self.global.devices.request_qr();
         }
         if let Some(id) = choose {
             self.selected = Some(id);
@@ -928,9 +937,13 @@ impl App {
             PanelId::About => redetect = global.settings.about(ui, status),
             p if p.needs_device() => {
                 let Some(device) = device else {
-                    let goto = no_device(ui, missing_selected.as_deref(), device_error.as_deref());
-                    if let Some(g) = goto {
-                        self.panel = g;
+                    match no_device(ui, missing_selected.as_deref(), device_error.as_deref()) {
+                        Some(Connect::Wifi) => self.panel = PanelId::Devices,
+                        Some(Connect::Qr) => {
+                            self.panel = PanelId::Devices;
+                            global.devices.request_qr();
+                        }
+                        None => {}
                     }
                     return;
                 };
@@ -1083,8 +1096,14 @@ fn device_state_hint(state: &DeviceState) -> &'static str {
     }
 }
 
-/// Explains why there is no usable device; returns a panel to open, if asked.
-fn no_device(ui: &mut Ui, lost: Option<&str>, error: Option<&str>) -> Option<PanelId> {
+/// How the user chose to connect a device from the "no device" screen.
+enum Connect {
+    Wifi,
+    Qr,
+}
+
+/// Explains why there is no usable device and offers the ways to connect one.
+fn no_device(ui: &mut Ui, lost: Option<&str>, error: Option<&str>) -> Option<Connect> {
     let mut goto = None;
     let (icon, title, detail) = match (lost, error) {
         (Some(id), _) => (
@@ -1096,12 +1115,15 @@ fn no_device(ui: &mut Ui, lost: Option<&str>, error: Option<&str>) -> Option<Pan
         (None, None) => (
             kit::ph::DEVICE_MOBILE,
             "No device selected".to_string(),
-            "Connect a device with USB debugging enabled, accept the prompt on the device, or add one over Wi-Fi.".to_string(),
+            "Connect a device with USB debugging enabled, accept the prompt on the device, or add one over Wi-Fi or with a QR code.".to_string(),
         ),
     };
     kit::empty_state(ui, icon, &title, &detail, |ui| {
         if kit::Btn::new("Connect over Wi-Fi").icon(kit::ph::WIFI_HIGH).primary().show(ui).clicked() {
-            goto = Some(PanelId::Devices);
+            goto = Some(Connect::Wifi);
+        }
+        if kit::Btn::new("Connect with QR code").icon(kit::ph::QR_CODE).primary().show(ui).clicked() {
+            goto = Some(Connect::Qr);
         }
     });
     goto

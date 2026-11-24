@@ -40,6 +40,13 @@ fn connection_succeeded(text: &str) -> bool {
     (t.contains("connected to") || t.contains("already connected")) && !t.contains("failed")
 }
 
+/// `Successfully paired to 192.168.1.20:41999 [guid=adb-R58M1234-AbCdEf]`: the guid.
+fn parse_guid(text: &str) -> Option<String> {
+    let rest = text.split_once("[guid=")?.1;
+    let guid = rest.split_once(']')?.0.trim();
+    (!guid.is_empty()).then(|| guid.to_string())
+}
+
 impl Adb {
     pub async fn connect(&self, host: &str, port: Option<u16>) -> Result<()> {
         let target = endpoint(host, port)?;
@@ -65,16 +72,25 @@ impl Adb {
     /// Pairs with a device showing a Wi-Fi pairing code. The code goes to
     /// stdin so it never appears in the process list.
     pub async fn pair(&self, host: &str, port: u16, code: &str) -> Result<()> {
-        let target = endpoint(host, Some(port))?;
         let code = code.trim();
         if code.len() < 6 || !code.chars().all(|c| c.is_ascii_digit()) {
             return Err(Error::Invalid("The pairing code is six digits".into()));
         }
-        let spec = self.spec().arg("pair").arg(target).stdin(format!("{code}\n").into_bytes()).timeout(Duration::from_secs(30));
+        self.pair_with_secret(host, port, code).await.map(|_| ())
+    }
+
+    /// Pairs with a password instead of the six-digit code (a QR code carries one). Returns the
+    /// phone's guid, which names its `_adb-tls-connect` service, when adb printed it.
+    pub(super) async fn pair_with_secret(&self, host: &str, port: u16, secret: &str) -> Result<Option<String>> {
+        let target = endpoint(host, Some(port))?;
+        if secret.is_empty() || !secret.chars().all(|c| c.is_ascii_graphic()) {
+            return Err(Error::Invalid("The pairing password is empty or has unusual characters".into()));
+        }
+        let spec = self.spec().arg("pair").arg(target).stdin(format!("{secret}\n").into_bytes()).timeout(Duration::from_secs(30));
         let out = run(&spec).await?;
         let text = format!("{}{}", out.stdout_text(), out.stderr);
         if text.contains("Successfully paired") {
-            Ok(())
+            Ok(parse_guid(&text))
         } else {
             Err(Error::Invalid(format!("Pairing failed: {}", text.trim())))
         }
@@ -120,6 +136,13 @@ mod tests {
         assert!(parse_port("0").is_err());
         assert!(parse_port("70000").is_err());
         assert!(parse_port("abc").is_err());
+    }
+
+    #[test]
+    fn the_guid_is_read_from_the_pairing_output() {
+        assert_eq!(parse_guid("Successfully paired to 192.168.1.20:41999 [guid=adb-R58M1234-AbCdEf]\n").as_deref(), Some("adb-R58M1234-AbCdEf"));
+        assert_eq!(parse_guid("Successfully paired to 192.168.1.20:41999\n"), None);
+        assert_eq!(parse_guid("[guid=]"), None);
     }
 
     #[test]

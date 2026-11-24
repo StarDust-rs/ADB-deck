@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use adbdeck::adb::devices::{watch_devices, DeviceState, Registry, Reload, Suppressed, WatchEvent, WatchOptions};
 use adbdeck::adb::files::{Direction, TransferEvent};
+use adbdeck::adb::qr::{QrSession, QrStage, QrTiming};
 use adbdeck::adb::Adb;
 use adbdeck::error::Error;
 use adbdeck::retry::Backoff;
@@ -994,4 +995,144 @@ async fn service_commands_and_reboots_reach_the_device() {
     );
     let err = dev.apply(&Command::BatteryLevel(200)).await.unwrap_err();
     assert!(matches!(err, Error::Invalid(_)), "range errors are reported before anything is sent");
+}
+
+// ---- QR code connection ---------------------------------------------------
+
+fn qr_timing() -> QrTiming {
+    QrTiming { lifetime: Duration::from_secs(10), poll: Duration::from_millis(50), connect_wait: Duration::from_secs(5) }
+}
+
+/// The password inside the QR code's text.
+fn qr_password(session: &QrSession) -> String {
+    session.payload().split(";P:").nth(1).and_then(|rest| rest.split(';').next()).expect("password in payload").to_string()
+}
+
+fn adb_log(f: &Fake) -> String {
+    fs::read_to_string(f.dir.path().join("home/adb.log")).unwrap_or_default()
+}
+
+/// A fake whose `adb` logs its calls, with the state directory ready for `mdns` and `devices` files.
+fn qr_fake() -> (Fake, PathBuf) {
+    let f = Fake::new("export FAKE_ADB_LOG=\"$FAKE_ADB_HOME/adb.log\"");
+    let home = f.dir.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    (f, home)
+}
+
+fn pairing_row(session: &QrSession, endpoint: &str) -> String {
+    format!("{}\t_adb-tls-pairing._tcp.\t{endpoint}\n", session.name())
+}
+
+#[tokio::test]
+async fn a_scanned_qr_code_pairs_and_connects_the_phone() {
+    let (f, home) = qr_fake();
+    let session = QrSession::new().unwrap();
+    fs::write(
+        home.join("mdns"),
+        format!(
+            "adb-OTHER99-xYz123\t_adb-tls-pairing._tcp.\t192.168.1.31:40999\n{}adb-FAKE9999-AbCdEf\t_adb-tls-connect._tcp.\t192.168.1.20:37123\nadb-OTHER99-xYz123\t_adb-tls-connect._tcp.\t192.168.1.31:40001\n",
+            pairing_row(&session, "192.168.1.20:41999")
+        ),
+    )
+    .unwrap();
+    let (stage, _rx) = tokio::sync::watch::channel(QrStage::Waiting);
+
+    let endpoint = f.adb.connect_with_qr(&session, qr_timing(), &stage).await.unwrap();
+
+    assert_eq!(endpoint, "192.168.1.20:37123", "the phone that scanned, not the other one on the network");
+    let log = adb_log(&f);
+    assert!(log.lines().any(|l| l == "pair 192.168.1.20:41999"), "{log}");
+    assert!(log.lines().any(|l| l == "connect 192.168.1.20:37123"), "{log}");
+    assert!(!log.lines().any(|l| l.contains("31:")), "the other phone is left alone: {log}");
+    assert!(!log.contains(&qr_password(&session)), "the password never appears in an argument list");
+    assert_eq!(fs::read_to_string(f.state().join("paircode")).unwrap().trim(), qr_password(&session), "it is given on stdin");
+    assert_eq!(*stage.borrow(), QrStage::Connecting);
+}
+
+#[tokio::test]
+async fn the_qr_flow_waits_for_the_scan_and_reports_its_stages() {
+    let (f, home) = qr_fake();
+    let session = QrSession::new().unwrap();
+    fs::write(home.join("mdns"), "").unwrap();
+    let (stage, rx) = tokio::sync::watch::channel(QrStage::Pairing);
+    let adb = f.adb.clone();
+    let task = {
+        let session = session.clone();
+        tokio::spawn(async move { adb.connect_with_qr(&session, qr_timing(), &stage).await })
+    };
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!task.is_finished(), "nothing was scanned yet");
+    assert_eq!(*rx.borrow(), QrStage::Waiting);
+    assert!(!adb_log(&f).lines().any(|l| l.starts_with("pair ")));
+
+    fs::write(home.join("mdns"), format!("{}adb-FAKE9999-AbCdEf\t_adb-tls-connect._tcp.\t192.168.1.20:37123\n", pairing_row(&session, "192.168.1.20:41999"))).unwrap();
+    let endpoint = tokio::time::timeout(Duration::from_secs(10), task).await.expect("finished").unwrap().unwrap();
+    assert_eq!(endpoint, "192.168.1.20:37123");
+}
+
+#[tokio::test]
+async fn a_code_that_nobody_scans_expires() {
+    let (f, home) = qr_fake();
+    let session = QrSession::new().unwrap();
+    fs::write(home.join("mdns"), "adb-OTHER99-xYz123\t_adb-tls-pairing._tcp.\t192.168.1.31:40999\n").unwrap();
+    let (stage, _rx) = tokio::sync::watch::channel(QrStage::Waiting);
+    let timing = QrTiming { lifetime: Duration::from_millis(400), ..qr_timing() };
+
+    let err = f.adb.connect_with_qr(&session, timing, &stage).await.unwrap_err();
+
+    assert!(err.to_string().contains("not scanned in time"), "{err}");
+    assert!(!adb_log(&f).lines().any(|l| l.starts_with("pair ")), "a phone that did not scan this code is never paired");
+}
+
+#[tokio::test]
+async fn an_mdns_failure_is_part_of_the_message_when_nothing_is_scanned() {
+    let f = Fake::new("export FAKE_ADB_MODE=exit1");
+    let (stage, _rx) = tokio::sync::watch::channel(QrStage::Waiting);
+    let timing = QrTiming { lifetime: Duration::from_millis(400), ..qr_timing() };
+
+    let err = f.adb.connect_with_qr(&QrSession::new().unwrap(), timing, &stage).await.unwrap_err().to_string();
+
+    assert!(err.contains("not scanned in time") && err.contains("simulated failure"), "{err}");
+}
+
+#[tokio::test]
+async fn a_paired_phone_that_offers_no_connection_is_reported_as_paired() {
+    let (f, home) = qr_fake();
+    let session = QrSession::new().unwrap();
+    fs::write(home.join("mdns"), pairing_row(&session, "192.168.1.20:41999")).unwrap();
+    let (stage, _rx) = tokio::sync::watch::channel(QrStage::Waiting);
+    let timing = QrTiming { connect_wait: Duration::from_millis(400), ..qr_timing() };
+
+    let err = f.adb.connect_with_qr(&session, timing, &stage).await.unwrap_err();
+
+    assert!(err.to_string().contains("is paired"), "{err}");
+    assert!(adb_log(&f).lines().any(|l| l == "pair 192.168.1.20:41999"));
+    assert!(!adb_log(&f).lines().any(|l| l.starts_with("connect ")));
+}
+
+#[tokio::test]
+async fn a_phone_that_adb_already_connected_is_not_connected_twice() {
+    let (f, home) = qr_fake();
+    let session = QrSession::new().unwrap();
+    fs::write(home.join("mdns"), format!("{}adb-FAKE9999-AbCdEf\t_adb-tls-connect._tcp.\t{PHONE}\n", pairing_row(&session, "192.168.1.20:41999"))).unwrap();
+    fs::write(home.join("devices"), listing(Some("device"))).unwrap();
+    let (stage, _rx) = tokio::sync::watch::channel(QrStage::Waiting);
+
+    let endpoint = f.adb.connect_with_qr(&session, qr_timing(), &stage).await.unwrap();
+
+    assert_eq!(endpoint, PHONE);
+    assert!(!adb_log(&f).lines().any(|l| l.starts_with("connect ")), "{}", adb_log(&f));
+}
+
+#[tokio::test]
+async fn the_connection_service_may_be_found_by_the_guid_adb_printed() {
+    let (f, home) = qr_fake();
+    let session = QrSession::new().unwrap();
+    // The fake's `adb pair` prints guid=adb-fake; the service sits at another address (a second interface).
+    fs::write(home.join("mdns"), format!("{}adb-fake\t_adb-tls-connect._tcp.\t10.0.0.7:36001\n", pairing_row(&session, "192.168.1.20:41999"))).unwrap();
+    let (stage, _rx) = tokio::sync::watch::channel(QrStage::Waiting);
+
+    assert_eq!(f.adb.connect_with_qr(&session, qr_timing(), &stage).await.unwrap(), "10.0.0.7:36001");
 }

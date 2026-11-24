@@ -38,6 +38,7 @@ ureq = { version = "2", default-features = false }
 roxmltree = "0.20"
 keyring = { version = "3", default-features = false, features = ["async-secret-service", "async-io", "crypto-rust"] }
 openh264 = "0.9"
+qrcode = { version = "0.14", default-features = false }
 egui-phosphor = { version = "=0.9.0", default-features = false, features = ["regular", "fill"] }
 
 [dev-dependencies]

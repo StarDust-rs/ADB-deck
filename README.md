@@ -62,7 +62,7 @@ lookups off; icons already cached are still shown.
 
 ## Keeping a phone connected (background service)
 
-Connect a phone once (Connections: Wi-Fi address, pairing code, or "Switch a USB device to Wi-Fi").
+Connect a phone once (Connections: Wi-Fi address, pairing code, a QR code scanned with the phone, or "Switch a USB device to Wi-Fi").
 ADB Deck saves it: serial number, every `ip:port` it was reached at, Android version, last time seen,
 and whether it should be reconnected automatically.
 
